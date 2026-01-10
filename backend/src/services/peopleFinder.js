@@ -65,11 +65,10 @@ export class PeopleFinderTool {
 
   /**
    * Build search query for finding people at a company
-   * If a target role is specified, find people in that role
-   * Otherwise, find recruiters/hiring managers
+   * Uses only company name and role name for a focused search
    */
   buildSearchQuery(params) {
-    const { role, company, department } = params;
+    const { role, company } = params;
     
     const queryParts = [];
     
@@ -78,51 +77,10 @@ export class PeopleFinderTool {
     }
     
     if (role) {
-      // When a specific role is provided, search for people in that role
-      // Also include related hiring roles for that position
-      const roleLower = role.toLowerCase();
-      
-      // Build role-specific search terms
-      const roleTerms = [`"${role}"`];
-      
-      // Add related titles based on the role type
-      if (roleLower.includes('scientist') || roleLower.includes('researcher')) {
-        roleTerms.push(`"${role.replace(/scientist/i, 'lead')}"`);
-        roleTerms.push(`"senior ${role}"`);
-        roleTerms.push(`"staff ${role}"`);
-        roleTerms.push(`"principal ${role}"`);
-        roleTerms.push('"research manager"');
-        roleTerms.push('"research director"');
-      } else if (roleLower.includes('engineer') || roleLower.includes('developer')) {
-        roleTerms.push(`"senior ${role}"`);
-        roleTerms.push(`"staff ${role}"`);
-        roleTerms.push('"engineering manager"');
-        roleTerms.push('"tech lead"');
-      } else if (roleLower.includes('manager')) {
-        roleTerms.push(`"senior ${role}"`);
-        roleTerms.push(`"director"`);
-      } else if (roleLower.includes('designer')) {
-        roleTerms.push(`"senior ${role}"`);
-        roleTerms.push('"design manager"');
-        roleTerms.push('"head of design"');
-      } else if (roleLower.includes('product')) {
-        roleTerms.push(`"senior ${role}"`);
-        roleTerms.push('"product lead"');
-        roleTerms.push('"group product manager"');
-      } else {
-        // For other roles, include senior variant and generic hiring terms
-        roleTerms.push(`"senior ${role}"`);
-        roleTerms.push(`"head of ${role.split(' ').pop()}"`);
-      }
-      
-      queryParts.push(`(${roleTerms.join(' OR ')})`);
+      queryParts.push(`"${role}"`);
     } else {
       // No specific role - default to recruiters/talent acquisition
       queryParts.push('(recruiter OR "talent acquisition" OR "hiring manager")');
-    }
-    
-    if (department) {
-      queryParts.push(`"${department}"`);
     }
 
     return queryParts.join(' ');

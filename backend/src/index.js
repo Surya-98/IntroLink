@@ -2,12 +2,33 @@ import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import pdfParse from 'pdf-parse';
+import mammoth from 'mammoth';
 import { x402 } from './services/x402Protocol.js';
 import { PeopleFinderTool, MockPeopleFinderTool } from './services/peopleFinder.js';
 import { JobFinderTool, MockJobFinderTool } from './services/jobFinder.js';
 import { HappenstanceEnricher, MockHappenstanceEnricher } from './services/happenstanceEnricher.js';
 import { getOrchestrator } from './services/agentOrchestrator.js';
 import { Offer, Receipt, Contact, Job, Workflow, Email, Resume } from './models/schemas.js';
+
+// Configure multer for file uploads (store in memory)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain'
+    ];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only PDF, DOCX, and TXT files are allowed.'));
+    }
+  }
+});
 
 dotenv.config();
 
@@ -74,6 +95,56 @@ const initializeTools = () => {
  */
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+/**
+ * Upload and parse resume (PDF, DOCX, or TXT)
+ */
+app.post('/api/resume/upload', upload.single('resume'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const { buffer, mimetype, originalname } = req.file;
+    let text = '';
+
+    console.log(`[API] Processing resume upload: ${originalname} (${mimetype})`);
+
+    // Parse based on file type
+    if (mimetype === 'application/pdf') {
+      const pdfData = await pdfParse(buffer);
+      text = pdfData.text;
+    } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      const result = await mammoth.extractRawText({ buffer });
+      text = result.value;
+    } else if (mimetype === 'text/plain') {
+      text = buffer.toString('utf-8');
+    } else {
+      return res.status(400).json({ error: 'Unsupported file type' });
+    }
+
+    // Clean up the text
+    text = text
+      .replace(/\r\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    if (!text) {
+      return res.status(400).json({ error: 'Could not extract text from file. The file may be empty or corrupted.' });
+    }
+
+    console.log(`[API] Successfully extracted ${text.length} characters from resume`);
+
+    res.json({
+      text,
+      filename: originalname,
+      characters: text.length
+    });
+  } catch (error) {
+    console.error('[API] Resume upload error:', error);
+    res.status(500).json({ error: error.message || 'Failed to parse resume' });
+  }
 });
 
 /**

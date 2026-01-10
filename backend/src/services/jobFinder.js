@@ -340,6 +340,46 @@ export class JobFinderTool {
   }
 
   /**
+   * Extract company name from LinkedIn API response
+   * Handles various field names and nested structures
+   */
+  extractCompanyName(item, context) {
+    // Direct field names
+    if (item.companyName) return item.companyName;
+    if (item.organizationName) return item.organizationName;
+    if (item.employerName) return item.employerName;
+    
+    // Nested company object (common in LinkedIn API)
+    if (item.company) {
+      if (typeof item.company === 'string') return item.company;
+      if (item.company.name) return item.company.name;
+      if (item.company.universalName) return item.company.universalName;
+      if (item.company['universal-name']) return item.company['universal-name'];
+    }
+    
+    // Nested organization object
+    if (item.organization) {
+      if (typeof item.organization === 'string') return item.organization;
+      if (item.organization.name) return item.organization.name;
+    }
+    
+    // Nested hiringOrganization (schema.org format)
+    if (item.hiringOrganization) {
+      if (typeof item.hiringOrganization === 'string') return item.hiringOrganization;
+      if (item.hiringOrganization.name) return item.hiringOrganization.name;
+    }
+    
+    // Fallback to search context (the company user searched for)
+    if (context?.company) return context.company;
+    
+    // Log unknown structure for debugging
+    console.log('[JobFinder] Could not find company name. Item keys:', Object.keys(item).join(', '));
+    if (item.company) console.log('[JobFinder] company field type:', typeof item.company, item.company);
+    
+    return 'Unknown Company';
+  }
+
+  /**
    * Parse Apify results into structured job format
    */
   parseResults(rawResults, context) {
@@ -363,6 +403,9 @@ export class JobFinderTool {
    * Extract job information from a search result
    */
   extractJobInfo(item, context) {
+    // Extract company name from various possible locations in LinkedIn API response
+    const companyName = this.extractCompanyName(item, context);
+    
     // The Advanced LinkedIn Job Search API returns structured data
     return {
       // Basic job info
@@ -372,7 +415,7 @@ export class JobFinderTool {
       description_snippet: (item.description || item.jobDescription || '').substring(0, 500),
       
       // Company info
-      company_name: item.companyName || item.company || 'Unknown Company',
+      company_name: companyName,
       company_url: item.companyUrl || item.companyLinkedInUrl || null,
       company_logo: item.companyLogo || item.logoUrl || null,
       company_size: item.companySize || item.employeeCount || null,

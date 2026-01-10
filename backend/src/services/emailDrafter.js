@@ -11,7 +11,7 @@ const FIREWORKS_API_URL = 'https://api.fireworks.ai/inference/v1/chat/completion
 export class EmailDrafterService {
   constructor(apiKey) {
     this.apiKey = apiKey || process.env.FIREWORKS_API_KEY;
-    this.model = 'accounts/fireworks/models/glm-4-9b-chat';
+    this.model = 'accounts/fireworks/models/glm-4p7'
     
     // Pricing (approximate - Fireworks pricing varies)
     this.inputTokenCost = 0.0000002;  // $0.20 per 1M input tokens
@@ -22,14 +22,14 @@ export class EmailDrafterService {
    * Generate a personalized outreach email
    */
   async generateEmail(params) {
-    const { resume, job, contact } = params;
+    const { resumeText, job, contact } = params;
 
     if (!this.apiKey) {
       throw new Error('FIREWORKS_API_KEY not configured');
     }
 
     const systemPrompt = this.buildSystemPrompt();
-    const userPrompt = this.buildUserPrompt(resume, job, contact);
+    const userPrompt = this.buildUserPromptFromRawResume(resumeText, job, contact);
 
     console.log(`[EmailDrafter] Generating email for ${contact.name} at ${job.company_name}`);
 
@@ -88,53 +88,48 @@ export class EmailDrafterService {
    * Build the system prompt for email generation
    */
   buildSystemPrompt() {
-    return `You are an expert career coach and professional email writer. Your task is to write compelling, personalized outreach emails for job seekers to send to recruiters and hiring managers.
+    return `You are a senior career coach and outreach copywriter. Write a highly personalized, credible cold outreach message to a recruiter or hiring manager about a specific role.
 
-Guidelines for writing effective outreach emails:
-1. Keep it concise (150-250 words max for the body)
-2. Start with a personalized hook - mention something specific about the company or role
-3. Quickly establish credibility with 1-2 key relevant achievements
-4. Show genuine interest in the specific role/company
-5. Include a clear, soft call-to-action (request a conversation, not demand a job)
-6. Be professional but warm and authentic - avoid generic corporate speak
-7. Never be pushy or desperate
-8. Don't use phrases like "I hope this email finds you well" or "I'm reaching out because"
+Hard requirements:
+- Body length: 90–170 words (shorter is better).
+- Use 1 personalized hook grounded in the provided context (role/company/team/product/job description). If no real hook is available, use a neutral hook referencing the role scope only—do NOT invent facts.
+- Include exactly 2 credibility bullets (•) with concrete outcomes (metrics, scope, impact). If metrics are missing, quantify conservatively without making up numbers.
+- Mention 1 alignment line tying the user's experience to 1–2 responsibilities from the job posting.
+- Clear, soft CTA: ask for a 10–15 minute chat or confirm the best person to speak with.
+- Professional, warm, direct. No fluff, no desperation.
 
-Output format:
-SUBJECT: [Your subject line here]
+Style rules:
+- Do NOT use: "I hope this email finds you well", "I'm reaching out because", "circling back", "just checking in", "would love to pick your brain".
+- Avoid buzzwords and generic corporate language (e.g., "synergy", "passionate", "dynamic", "fast-paced").
+- Do not over-praise the company. One sentence max.
+- Never claim you used tools or searched the web unless explicitly provided in the context.
+- Do not use em dashes (—). Use commas, parentheses, or short sentences instead.
+
+Input you will receive (may be incomplete):
+- role_title, company_name, job_url
+- job_description (optional)
+- recipient_name, recipient_role (optional)
+- candidate_background (resume bullets/projects/skills)
+- candidate_links (GitHub/portfolio/LinkedIn) (optional)
+
+Output format (exactly):
+SUBJECT: <5–8 words, specific, not cheesy>
 
 BODY:
-[Your email body here]
-
-End with an appropriate professional sign-off but don't include a signature block.`;
+<email body with 1 short opening paragraph, then 2 bullet credibility lines, then 1 alignment sentence, then CTA + sign-off>`;
   }
 
   /**
-   * Build the user prompt with resume, job, and contact context
+   * Build user prompt using raw resume text (no parsing needed)
    */
-  buildUserPrompt(resume, job, contact) {
+  buildUserPromptFromRawResume(resumeText, job, contact) {
     const parts = [];
 
     parts.push('Write a personalized outreach email based on the following information:\n');
 
-    // Candidate (resume) info
-    parts.push('## CANDIDATE INFORMATION:');
-    parts.push(`Name: ${resume.name || 'Job Seeker'}`);
-    if (resume.current_title) parts.push(`Current Role: ${resume.current_title}`);
-    if (resume.current_company) parts.push(`Current Company: ${resume.current_company}`);
-    if (resume.years_of_experience) parts.push(`Years of Experience: ${resume.years_of_experience}`);
-    if (resume.summary) parts.push(`Summary: ${resume.summary}`);
-    if (resume.skills?.length) parts.push(`Key Skills: ${resume.skills.slice(0, 10).join(', ')}`);
-    if (resume.experience?.length) {
-      const recentExp = resume.experience.slice(0, 2);
-      parts.push('Recent Experience:');
-      recentExp.forEach(exp => {
-        parts.push(`- ${exp.title} at ${exp.company}`);
-        if (exp.highlights?.length) {
-          parts.push(`  Highlights: ${exp.highlights.slice(0, 2).join('; ')}`);
-        }
-      });
-    }
+    // Candidate resume (raw text)
+    parts.push('## CANDIDATE RESUME:');
+    parts.push(resumeText.substring(0, 3000)); // Limit to avoid token overflow
     parts.push('');
 
     // Job info
@@ -156,7 +151,7 @@ End with an appropriate professional sign-off but don't include a signature bloc
     if (contact.snippet) parts.push(`Background: ${contact.snippet}`);
     parts.push('');
 
-    parts.push('Write the email now. Remember to be specific and personalized.');
+    parts.push('Write the email now. Extract relevant skills and experience from the resume to personalize the email.');
 
     return parts.join('\n');
   }
@@ -174,7 +169,7 @@ End with an appropriate professional sign-off but don't include a signature bloc
       subject = subjectMatch[1].trim();
     }
 
-    // Try to extract body
+    // Try to extract body - look for BODY: marker
     const bodyMatch = content.match(/BODY:\s*([\s\S]+)/i);
     if (bodyMatch) {
       body = bodyMatch[1].trim();
@@ -184,14 +179,74 @@ End with an appropriate professional sign-off but don't include a signature bloc
       body = afterSubject;
     }
 
+    // Clean up body - remove chain-of-thought artifacts
+    body = this.cleanEmailBody(body);
+
     // Fallback: if no structure found, use the whole thing
     if (!subject && !body) {
       const lines = content.split('\n').filter(l => l.trim());
       subject = lines[0] || 'Regarding the open position';
       body = lines.slice(1).join('\n') || content;
+      body = this.cleanEmailBody(body);
     }
 
     return { subject, body };
+  }
+
+  /**
+   * Clean up the email body by removing chain-of-thought reasoning artifacts
+   */
+  cleanEmailBody(body) {
+    if (!body) return body;
+
+    // Remove numbered reasoning steps (1. **, 2. **, etc.)
+    // These are chain-of-thought artifacts from the LLM
+    const reasoningPatterns = [
+      /^\d+\.\s+\*\*.*?\*\*[\s\S]*?(?=\n\n|\nHi\s|\nHello\s|\nDear\s|$)/gm,  // "1. **Analyze**..." patterns
+      /^\*\s+\*\*.*?\*\*.*$/gm,  // "* **Key point**..." patterns
+      /^#{1,3}\s+.+$/gm,  // Markdown headers in reasoning
+    ];
+
+    let cleanedBody = body;
+    
+    // Find where the actual email starts (usually with a greeting)
+    const greetingMatch = cleanedBody.match(/\n?(Hi\s+\w+|Hello\s+\w+|Dear\s+\w+)/i);
+    if (greetingMatch && greetingMatch.index !== undefined) {
+      // Check if there's reasoning content before the greeting
+      const beforeGreeting = cleanedBody.substring(0, greetingMatch.index);
+      if (beforeGreeting.match(/\d+\.\s+\*\*|\*\s+\*\*|^#+\s/m)) {
+        // There's reasoning before the greeting, extract from greeting onwards
+        cleanedBody = cleanedBody.substring(greetingMatch.index).trim();
+      }
+    }
+
+    // Remove any trailing reasoning (often starts with numbered items or bullet points after sign-off)
+    const signOffPatterns = [
+      /Best,?\s*$/i,
+      /Best regards,?\s*$/i,
+      /Sincerely,?\s*$/i,
+      /Thanks,?\s*$/i,
+      /Thank you,?\s*$/i,
+      /Warm regards,?\s*$/i,
+      /Cheers,?\s*$/i,
+    ];
+
+    for (const pattern of signOffPatterns) {
+      const match = cleanedBody.match(pattern);
+      if (match && match.index !== undefined) {
+        // Keep everything up to and including the sign-off
+        cleanedBody = cleanedBody.substring(0, match.index + match[0].length);
+        break;
+      }
+    }
+
+    // Remove any remaining chain-of-thought numbering at the start
+    cleanedBody = cleanedBody.replace(/^\d+\.\s+\*\*[^*]+\*\*:?\s*/gm, '');
+    
+    // Clean up extra whitespace
+    cleanedBody = cleanedBody.replace(/\n{3,}/g, '\n\n').trim();
+
+    return cleanedBody;
   }
 
   /**

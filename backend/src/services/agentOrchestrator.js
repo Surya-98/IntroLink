@@ -43,6 +43,11 @@ export class AgentOrchestrator extends EventEmitter {
 
     // Active workflows being processed
     this.activeWorkflows = new Map();
+
+    // Add default error handler to prevent unhandled error crashes
+    this.on('error', (data) => {
+      console.error('[AgentOrchestrator] Error event:', data);
+    });
   }
 
   /**
@@ -114,19 +119,17 @@ export class AgentOrchestrator extends EventEmitter {
 
     try {
       // ============================================
-      // Step 1: Parse Resume
+      // Step 1: Store Resume (skip parsing, use raw text)
       // ============================================
-      await this.updateWorkflowStatus(workflowId, 'parsing_resume', 'Parsing resume...');
+      await this.updateWorkflowStatus(workflowId, 'parsing_resume', 'Processing resume...');
       
-      const parseResult = await this.resumeParser.parseResume(resumeText);
-      if (!parseResult.success) {
-        throw new Error('Failed to parse resume');
-      }
-
-      // Save resume to database
+      // Save resume with raw text only - no parsing needed
       const resume = await Resume.create({
         raw_text: resumeText,
-        ...parseResult.data
+        name: 'Job Seeker', // Placeholder - email drafter will use raw text
+        skills: [],
+        experience: [],
+        education: []
       });
 
       // Link resume to workflow
@@ -134,11 +137,11 @@ export class AgentOrchestrator extends EventEmitter {
         resume_id: resume._id
       });
 
-      console.log(`[Agent] Resume parsed for: ${resume.name}`);
+      console.log(`[Agent] Resume stored (using raw text for email drafting)`);
       this.emit('progress', { 
         workflowId, 
         step: 'resume_parsed', 
-        data: { name: resume.name, skills: resume.skills?.slice(0, 5) }
+        data: { message: 'Resume stored successfully' }
       });
 
       // ============================================
@@ -147,7 +150,7 @@ export class AgentOrchestrator extends EventEmitter {
       const allJobs = [];
       const allContacts = [];
       const allEmails = [];
-      let totalCost = parseResult.metadata?.cost_usd || 0;
+      let totalCost = 0;
       const costBreakdown = { job_search: 0, people_search: 0, email_generation: 0 };
 
       for (let roleIndex = 0; roleIndex < targetRoles.length; roleIndex++) {
@@ -239,7 +242,7 @@ export class AgentOrchestrator extends EventEmitter {
 
             try {
               const emailResult = await this.emailDrafter.generateEmail({
-                resume: parseResult.data,
+                resumeText: resumeText,  // Pass raw resume text
                 job: savedJob,
                 contact: savedContact
               });
@@ -265,10 +268,7 @@ export class AgentOrchestrator extends EventEmitter {
                     description_snippet: savedJob.description_snippet
                   },
                   resume_context: {
-                    name: resume.name,
-                    current_title: resume.current_title,
-                    skills: resume.skills?.slice(0, 5),
-                    summary: resume.summary
+                    raw_text_preview: resumeText.substring(0, 500)
                   }
                 });
 

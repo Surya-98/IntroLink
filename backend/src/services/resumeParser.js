@@ -11,6 +11,7 @@ const FIREWORKS_API_URL = 'https://api.fireworks.ai/inference/v1/chat/completion
 export class ResumeParserService {
   constructor(apiKey) {
     this.apiKey = apiKey || process.env.FIREWORKS_API_KEY;
+    // GLM-4 model
     this.model = 'accounts/fireworks/models/glm-4p7';
     
     // Pricing (GLM-4 on Fireworks)
@@ -60,12 +61,13 @@ export class ResumeParserService {
       try {
         parsedResume = JSON.parse(content);
       } catch (parseError) {
-        console.error('[ResumeParser] Failed to parse JSON response:', content);
-        // Attempt to extract JSON from the response
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsedResume = JSON.parse(jsonMatch[0]);
-        } else {
+        console.log('[ResumeParser] Direct JSON parse failed, attempting extraction...');
+        
+        // Try multiple extraction strategies
+        parsedResume = this.extractJSON(content);
+        
+        if (!parsedResume) {
+          console.error('[ResumeParser] Failed to extract JSON from response. First 500 chars:', content.substring(0, 500));
           throw new Error('Failed to parse resume structure');
         }
       }
@@ -102,65 +104,83 @@ export class ResumeParserService {
    * Build the system prompt for resume parsing
    */
   buildSystemPrompt() {
-    return `You are an expert resume parser. Extract structured information from resumes and return it as valid JSON.
+    return `You are a resume parser API. You MUST respond with ONLY a JSON object, no other text.
 
-Output the following JSON structure (use null for missing fields):
+CRITICAL: Your entire response must be a single valid JSON object. Do not include any explanations, markdown, or text outside the JSON.
 
-{
-  "name": "Full Name",
-  "email": "email@example.com",
-  "phone": "+1-234-567-8900",
-  "location": "City, State/Country",
-  "linkedin_url": "https://linkedin.com/in/...",
-  "portfolio_url": "https://...",
-  "summary": "Professional summary or objective statement",
-  "skills": ["skill1", "skill2", ...],
-  "technical_skills": ["Python", "JavaScript", ...],
-  "soft_skills": ["Leadership", "Communication", ...],
-  "experience": [
-    {
-      "company": "Company Name",
-      "title": "Job Title",
-      "location": "City, State",
-      "start_date": "Month Year",
-      "end_date": "Month Year or Present",
-      "is_current": true/false,
-      "description": "Brief role description",
-      "highlights": ["Achievement 1", "Achievement 2"]
+Extract this structure from the resume:
+
+{"name":"string","email":"string|null","phone":"string|null","location":"string|null","linkedin_url":"string|null","portfolio_url":"string|null","summary":"string|null","skills":["string"],"technical_skills":["string"],"soft_skills":["string"],"experience":[{"company":"string","title":"string","location":"string|null","start_date":"string","end_date":"string","is_current":boolean,"description":"string|null","highlights":["string"]}],"education":[{"institution":"string","degree":"string|null","field":"string|null","graduation_date":"string|null","gpa":"string|null"}],"certifications":["string"],"projects":[{"name":"string","description":"string|null","technologies":["string"],"url":"string|null"}],"years_of_experience":number,"current_title":"string|null","current_company":"string|null"}
+
+Rules:
+- Use null for missing fields
+- Calculate years_of_experience from work dates
+- Set is_current=true and end_date="Present" for current jobs
+- The most recent job is usually listed first
+- Output ONLY the JSON object, nothing else`;
+  }
+
+  /**
+   * Extract JSON from a response that may contain other text
+   */
+  extractJSON(content) {
+    // Strategy 1: Find JSON object with balanced braces
+    let depth = 0;
+    let start = -1;
+    let end = -1;
+    
+    for (let i = 0; i < content.length; i++) {
+      if (content[i] === '{') {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (content[i] === '}') {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          end = i + 1;
+          break;
+        }
+      }
     }
-  ],
-  "education": [
-    {
-      "institution": "University Name",
-      "degree": "Bachelor of Science",
-      "field": "Computer Science",
-      "graduation_date": "Year or Month Year",
-      "gpa": "3.8/4.0"
+    
+    if (start !== -1 && end !== -1) {
+      try {
+        const jsonStr = content.substring(start, end);
+        return JSON.parse(jsonStr);
+      } catch (e) {
+        // Continue to next strategy
+      }
     }
-  ],
-  "certifications": ["Certification 1", "Certification 2"],
-  "projects": [
-    {
-      "name": "Project Name",
-      "description": "What it does",
-      "technologies": ["Tech1", "Tech2"],
-      "url": "https://..."
+    
+    // Strategy 2: Try to find JSON in code blocks
+    const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      try {
+        return JSON.parse(codeBlockMatch[1].trim());
+      } catch (e) {
+        // Continue
+      }
     }
-  ],
-  "years_of_experience": 5,
-  "current_title": "Current Job Title",
-  "current_company": "Current Company Name"
-}
-
-Important guidelines:
-1. Extract ALL information present in the resume
-2. For years_of_experience, calculate based on work history dates
-3. Skills should include both explicit skills and those implied by experience
-4. Use consistent date formats (Month Year like "January 2020")
-5. For current positions, set is_current to true and end_date to "Present"
-6. Return ONLY valid JSON, no explanations or markdown
-
-Return your response as a valid JSON object only.`;
+    
+    // Strategy 3: Greedy regex match
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch (e) {
+        // Try to fix common issues
+        let fixed = jsonMatch[0]
+          .replace(/,\s*}/g, '}')  // Remove trailing commas
+          .replace(/,\s*]/g, ']')  // Remove trailing commas in arrays
+          .replace(/'/g, '"');     // Replace single quotes
+        try {
+          return JSON.parse(fixed);
+        } catch (e2) {
+          // Give up
+        }
+      }
+    }
+    
+    return null;
   }
 
   /**
