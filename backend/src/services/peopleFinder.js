@@ -11,8 +11,9 @@ const ACTOR_ID = 'fantastic-jobs~exa-ai-people-search';
  * using Exa's people search capabilities via Apify.
  */
 export class PeopleFinderTool {
-  constructor(apiToken) {
-    this.apiToken = apiToken;
+  constructor(apifyToken, exaApiKey) {
+    this.apifyToken = apifyToken;
+    this.exaApiKey = exaApiKey || process.env.EXA_API_KEY;
     this.name = 'People Finder';
     this.type = 'people_search';
     this.providerName = 'apify-exa';
@@ -119,6 +120,7 @@ export class PeopleFinderTool {
       const runResponse = await axios.post(
         `${APIFY_BASE_URL}/acts/${ACTOR_ID}/runs`,
         {
+          exaApiKey: this.exaApiKey,
           query: searchQuery,
           numResults: numResults,
           // Exa-specific options
@@ -133,7 +135,7 @@ export class PeopleFinderTool {
             'Content-Type': 'application/json'
           },
           params: {
-            token: this.apiToken
+            token: this.apifyToken
           }
         }
       );
@@ -178,7 +180,7 @@ export class PeopleFinderTool {
         const statusResponse = await axios.get(
           `${APIFY_BASE_URL}/actor-runs/${runId}`,
           {
-            params: { token: this.apiToken }
+            params: { token: this.apifyToken }
           }
         );
 
@@ -191,7 +193,7 @@ export class PeopleFinderTool {
           const resultsResponse = await axios.get(
             `${APIFY_BASE_URL}/datasets/${datasetId}/items`,
             {
-              params: { token: this.apiToken }
+              params: { token: this.apifyToken }
             }
           );
           return resultsResponse.data;

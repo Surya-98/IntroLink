@@ -10,6 +10,9 @@
  * 4. Show receipt with cost provenance
  */
 
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { x402 } from './services/x402Protocol.js';
 import { PeopleFinderTool, MockPeopleFinderTool } from './services/peopleFinder.js';
 import mongoose from 'mongoose';
@@ -17,6 +20,7 @@ import mongoose from 'mongoose';
 // Configuration
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/introlink';
 const APIFY_TOKEN = process.env.APIFY_TOKEN;
+const EXA_API_KEY = process.env.EXA_API_KEY;
 
 async function testPeopleFinder() {
   console.log('🔍 IntroLink People Finder Test\n');
@@ -31,10 +35,13 @@ async function testPeopleFinder() {
   }
 
   // Register providers
-  if (APIFY_TOKEN) {
-    const realProvider = new PeopleFinderTool(APIFY_TOKEN);
+  if (APIFY_TOKEN && EXA_API_KEY) {
+    const realProvider = new PeopleFinderTool(APIFY_TOKEN, EXA_API_KEY);
     x402.registerProvider('people-finder-exa', realProvider);
     console.log('✓ Registered: Apify Exa People Search (REAL)');
+  } else if (APIFY_TOKEN && !EXA_API_KEY) {
+    console.log('⚠ No EXA_API_KEY - Apify actor requires Exa API key');
+    console.log('  Get one at: https://exa.ai');
   } else {
     console.log('⚠ No APIFY_TOKEN - using mock provider only');
   }
@@ -47,7 +54,7 @@ async function testPeopleFinder() {
   const searchParams = {
     company: 'Stripe',
     role: 'Software Engineer',
-    numResults: 3
+    numResults: 5  // Exa requires minimum 5 results
   };
 
   console.log('📋 Search Parameters:');
@@ -77,9 +84,19 @@ async function testPeopleFinder() {
     }
 
     // Step 2: Select best offer
-    console.log('🎯 Step 2: Selecting best offer (strategy: cheapest)...\n');
+    // Use 'real' strategy to prefer real providers over mocks for demo
+    const strategy = process.env.USE_MOCK ? 'cheapest' : 'real';
+    console.log(`🎯 Step 2: Selecting best offer (strategy: ${strategy})...\n`);
     
-    const bestOffer = x402.selectBestOffer(quotes, 'cheapest');
+    // For demo: prefer real Apify provider if available
+    let bestOffer;
+    const realProvider = quotes.find(q => q.provider === 'apify-exa');
+    if (!process.env.USE_MOCK && realProvider) {
+      bestOffer = realProvider;
+      console.log(`   Preferring real provider for demo...\n`);
+    } else {
+      bestOffer = x402.selectBestOffer(quotes, 'cheapest');
+    }
     console.log(`   Selected: ${bestOffer.provider} at $${bestOffer.price_usd.toFixed(4)}\n`);
 
     // Step 3: Pay and execute

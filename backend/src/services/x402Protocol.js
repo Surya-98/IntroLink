@@ -1,5 +1,4 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Offer, Receipt } from '../models/schemas.js';
 
 /**
  * x402 Payment Protocol Implementation
@@ -10,6 +9,87 @@ import { Offer, Receipt } from '../models/schemas.js';
  * 3. Pay the winner and retry the request
  * 4. Store receipt and return result
  */
+
+// In-memory storage (used when MongoDB is not available)
+const inMemoryStore = {
+  offers: new Map(),
+  receipts: new Map()
+};
+
+// Try to import MongoDB models, fall back to in-memory
+let Offer, Receipt;
+try {
+  const schemas = await import('../models/schemas.js');
+  Offer = schemas.Offer;
+  Receipt = schemas.Receipt;
+} catch (e) {
+  // MongoDB not available, will use in-memory store
+}
+
+// Helper functions for storage abstraction
+const storage = {
+  async createOffer(data) {
+    if (Offer && Offer.create) {
+      try {
+        return await Offer.create(data);
+      } catch (e) {
+        // Fall back to in-memory on error
+      }
+    }
+    // In-memory fallback
+    const offer = {
+      _id: uuidv4(),
+      ...data,
+      created_at: new Date()
+    };
+    inMemoryStore.offers.set(offer._id, offer);
+    return offer;
+  },
+
+  async findOffer(id) {
+    if (Offer && Offer.findById) {
+      try {
+        const doc = await Offer.findById(id);
+        if (doc) return doc;
+      } catch (e) {
+        // Fall back to in-memory
+      }
+    }
+    return inMemoryStore.offers.get(id) || inMemoryStore.offers.get(id?.toString());
+  },
+
+  async updateOffer(id, update) {
+    if (Offer && Offer.findByIdAndUpdate) {
+      try {
+        return await Offer.findByIdAndUpdate(id, update);
+      } catch (e) {
+        // Fall back to in-memory
+      }
+    }
+    const offer = inMemoryStore.offers.get(id) || inMemoryStore.offers.get(id?.toString());
+    if (offer) {
+      Object.assign(offer, update);
+    }
+    return offer;
+  },
+
+  async createReceipt(data) {
+    if (Receipt && Receipt.create) {
+      try {
+        return await Receipt.create(data);
+      } catch (e) {
+        // Fall back to in-memory
+      }
+    }
+    const receipt = {
+      _id: uuidv4(),
+      ...data,
+      created_at: new Date()
+    };
+    inMemoryStore.receipts.set(receipt._id, receipt);
+    return receipt;
+  }
+};
 
 export class X402Protocol {
   constructor() {
@@ -37,7 +117,7 @@ export class X402Protocol {
     const quoteInfo = await provider.getQuote(params);
     
     // Create offer record
-    const offer = await Offer.create({
+    const offer = await storage.createOffer({
       tool_id: toolId,
       tool_name: provider.name,
       provider: provider.providerName,
@@ -127,7 +207,7 @@ export class X402Protocol {
    * Pay for an offer and execute the tool
    */
   async payAndExecute(offerId) {
-    const offer = await Offer.findById(offerId);
+    const offer = await storage.findOffer(offerId);
     if (!offer) {
       throw new Error('Offer not found');
     }
@@ -136,8 +216,8 @@ export class X402Protocol {
       throw new Error(`Offer already ${offer.status}`);
     }
 
-    if (new Date() > offer.quote_expires_at) {
-      await Offer.findByIdAndUpdate(offerId, { status: 'expired' });
+    if (new Date() > new Date(offer.quote_expires_at)) {
+      await storage.updateOffer(offerId, { status: 'expired' });
       throw new Error('Quote expired');
     }
 
@@ -145,9 +225,6 @@ export class X402Protocol {
     if (!provider) {
       throw new Error(`Provider not found for tool: ${offer.tool_id}`);
     }
-
-    // Mark other pending offers for same request as rejected
-    // (In real system, this would happen after successful payment)
 
     // Simulate payment
     const transactionId = `tx_${uuidv4()}`;
@@ -159,10 +236,10 @@ export class X402Protocol {
       const executionTime = Date.now() - startTime;
 
       // Update offer status
-      await Offer.findByIdAndUpdate(offerId, { status: 'accepted' });
+      await storage.updateOffer(offerId, { status: 'accepted' });
 
       // Create receipt
-      const receipt = await Receipt.create({
+      const receipt = await storage.createReceipt({
         offer_id: offerId,
         tool_id: offer.tool_id,
         tool_name: offer.tool_name,
@@ -192,7 +269,7 @@ export class X402Protocol {
 
     } catch (err) {
       // In real x402, payment would be refunded on failure
-      await Offer.findByIdAndUpdate(offerId, { status: 'rejected' });
+      await storage.updateOffer(offerId, { status: 'rejected' });
       throw err;
     }
   }
@@ -214,7 +291,7 @@ export class X402Protocol {
     // Mark rejected offers
     for (const quote of quotes) {
       if (quote.offer_id.toString() !== bestOffer.offer_id.toString()) {
-        await Offer.findByIdAndUpdate(quote.offer_id, { status: 'rejected' });
+        await storage.updateOffer(quote.offer_id, { status: 'rejected' });
       }
     }
 
@@ -240,4 +317,3 @@ export class X402Protocol {
 }
 
 export const x402 = new X402Protocol();
-
