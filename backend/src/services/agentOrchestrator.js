@@ -196,7 +196,15 @@ export class AgentOrchestrator extends EventEmitter {
           const savedJob = await Job.create(job);
           allJobs.push(savedJob);
 
+          // Update progress immediately after job is saved
+          await Workflow.findByIdAndUpdate(workflowId, {
+            'progress.total_jobs_found': allJobs.length,
+            total_cost_usd: totalCost,
+            cost_breakdown: costBreakdown
+          });
+
           this.emit('job_found', { workflowId, job: savedJob });
+          console.log(`[Agent] Job ${allJobs.length} saved: ${savedJob.title} at ${savedJob.company_name}`);
 
           // ----------------------------------------
           // Step 2b: Find contacts for this job
@@ -229,7 +237,15 @@ export class AgentOrchestrator extends EventEmitter {
             const savedContact = await Contact.create(contact);
             allContacts.push(savedContact);
 
+            // Update progress immediately after contact is saved
+            await Workflow.findByIdAndUpdate(workflowId, {
+              'progress.total_contacts_found': allContacts.length,
+              total_cost_usd: totalCost,
+              cost_breakdown: costBreakdown
+            });
+
             this.emit('contact_found', { workflowId, contact: savedContact });
+            console.log(`[Agent] Contact ${allContacts.length} saved: ${savedContact.name}`);
 
             // ----------------------------------------
             // Step 2c: Draft personalized email
@@ -276,7 +292,15 @@ export class AgentOrchestrator extends EventEmitter {
                 costBreakdown.email_generation += emailResult.metadata.cost_usd || 0;
                 totalCost += emailResult.metadata.cost_usd || 0;
 
+                // Update progress immediately after email is drafted
+                await Workflow.findByIdAndUpdate(workflowId, {
+                  'progress.total_emails_drafted': allEmails.length,
+                  total_cost_usd: totalCost,
+                  cost_breakdown: costBreakdown
+                });
+
                 this.emit('email_drafted', { workflowId, email: savedEmail });
+                console.log(`[Agent] Email ${allEmails.length} drafted for ${savedContact.name}`);
               }
             } catch (emailError) {
               console.error(`[Agent] Failed to draft email for ${contact.name}:`, emailError.message);

@@ -547,6 +547,35 @@ export default function AgentWorkflow() {
                     <span className="font-mono text-volt-400">${status.workflow.total_cost_usd.toFixed(4)}</span>
                   </div>
                 )}
+
+                {/* Completion Banner */}
+                {status.workflow?.status === 'completed' && results && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 rounded-xl bg-volt-500/10 border border-volt-500/30 mt-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-volt-500/20 flex items-center justify-center">
+                          <CheckIcon className="w-5 h-5 text-volt-400" />
+                        </div>
+                        <div>
+                          <div className="text-volt-400 font-medium">Workflow Completed!</div>
+                          <div className="text-sm text-ink-400">
+                            {results.emails?.length || 0} emails ready to send
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => document.getElementById('results-section')?.scrollIntoView({ behavior: 'smooth' })}
+                        className="btn-primary text-sm"
+                      >
+                        View Results ↓
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
               </div>
 
               {/* Resume Info */}
@@ -584,7 +613,9 @@ export default function AgentWorkflow() {
       {/* Results Section */}
       <AnimatePresence>
         {results && (
-          <ResultsSection results={results} />
+          <div id="results-section">
+            <ResultsSection results={results} />
+          </div>
         )}
       </AnimatePresence>
     </div>
