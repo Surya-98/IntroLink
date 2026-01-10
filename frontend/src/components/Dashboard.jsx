@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useWorkflow } from '../context/WorkflowContext'
 import JobCard from './JobCard'
@@ -9,49 +9,125 @@ export default function Dashboard({ jobs: propJobs, contacts: propContacts, onNa
   const [contacts, setContacts] = useState(propContacts || [])
   const [receipts, setReceipts] = useState([])
   const [workflows, setWorkflows] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState({ jobs: 0, contacts: 0, receipts: 0, totalSpent: 0 })
+  
+  // Separate loading states for lazy loading
+  const [loadingWorkflows, setLoadingWorkflows] = useState(true)
+  const [loadingJobs, setLoadingJobs] = useState(false)
+  const [loadingContacts, setLoadingContacts] = useState(false)
+  const [loadingReceipts, setLoadingReceipts] = useState(false)
+  const [loadedSections, setLoadedSections] = useState({ workflows: false, jobs: false, contacts: false, receipts: false })
+  
   const [activeView, setActiveView] = useState('workflows')
 
   const { activeWorkflowId, isWorkflowRunning, resumeWorkflow } = useWorkflow()
 
+  // Fetch workflows on mount (default view)
   useEffect(() => {
-    fetchData()
+    fetchWorkflows()
+    fetchStats()
   }, [])
 
-  const fetchData = async () => {
-    setLoading(true)
+  // Lazy load data when view changes
+  useEffect(() => {
+    if (activeView === 'jobs' && !loadedSections.jobs) {
+      fetchJobs()
+    } else if (activeView === 'contacts' && !loadedSections.contacts) {
+      fetchContacts()
+    } else if (activeView === 'receipts' && !loadedSections.receipts) {
+      fetchReceipts()
+    }
+  }, [activeView, loadedSections])
+
+  const fetchStats = async () => {
     try {
-      const [jobsRes, contactsRes, receiptsRes, workflowsRes] = await Promise.all([
-        fetch('/api/jobs').then(r => r.json()),
-        fetch('/api/contacts').then(r => r.json()),
-        fetch('/api/receipts').then(r => r.json()),
-        fetch('/api/agent/workflows?limit=50').then(r => r.json())
-      ])
-      
-      setJobs(jobsRes.jobs || [])
-      setContacts(contactsRes.contacts || [])
-      setReceipts(receiptsRes.receipts || [])
-      setWorkflows(workflowsRes.workflows || [])
+      // Fetch just counts for stats - much faster
+      const res = await fetch('/api/stats')
+      if (res.ok) {
+        const data = await res.json()
+        setStats(data)
+      }
     } catch (error) {
-      console.error('Failed to fetch data:', error)
-    } finally {
-      setLoading(false)
+      console.error('Failed to fetch stats:', error)
     }
   }
+
+  const fetchWorkflows = async () => {
+    setLoadingWorkflows(true)
+    try {
+      const res = await fetch('/api/agent/workflows?limit=20')
+      const data = await res.json()
+      setWorkflows(data.workflows || [])
+      setLoadedSections(prev => ({ ...prev, workflows: true }))
+    } catch (error) {
+      console.error('Failed to fetch workflows:', error)
+    } finally {
+      setLoadingWorkflows(false)
+    }
+  }
+
+  const fetchJobs = async () => {
+    setLoadingJobs(true)
+    try {
+      const res = await fetch('/api/jobs?limit=50')
+      const data = await res.json()
+      setJobs(data.jobs || [])
+      setLoadedSections(prev => ({ ...prev, jobs: true }))
+    } catch (error) {
+      console.error('Failed to fetch jobs:', error)
+    } finally {
+      setLoadingJobs(false)
+    }
+  }
+
+  const fetchContacts = async () => {
+    setLoadingContacts(true)
+    try {
+      const res = await fetch('/api/contacts?limit=50')
+      const data = await res.json()
+      setContacts(data.contacts || [])
+      setLoadedSections(prev => ({ ...prev, contacts: true }))
+    } catch (error) {
+      console.error('Failed to fetch contacts:', error)
+    } finally {
+      setLoadingContacts(false)
+    }
+  }
+
+  const fetchReceipts = async () => {
+    setLoadingReceipts(true)
+    try {
+      const res = await fetch('/api/receipts?limit=30')
+      const data = await res.json()
+      setReceipts(data.receipts || [])
+      setLoadedSections(prev => ({ ...prev, receipts: true }))
+    } catch (error) {
+      console.error('Failed to fetch receipts:', error)
+    } finally {
+      setLoadingReceipts(false)
+    }
+  }
+
+  const refreshCurrentView = useCallback(() => {
+    if (activeView === 'workflows') fetchWorkflows()
+    else if (activeView === 'jobs') fetchJobs()
+    else if (activeView === 'contacts') fetchContacts()
+    else if (activeView === 'receipts') fetchReceipts()
+    fetchStats()
+  }, [activeView])
 
   const handleViewWorkflow = async (workflowId) => {
     await resumeWorkflow(workflowId)
     onNavigateToAgent?.()
   }
 
-  const totalSpent = receipts.reduce((sum, r) => sum + (r.amount_paid_usd || 0), 0)
   const totalWorkflowSpent = workflows.reduce((sum, w) => sum + (w.total_cost_usd || 0), 0)
 
-  const stats = [
-    { label: 'Workflows', value: workflows.length, icon: WorkflowIcon, color: 'signal' },
-    { label: 'Jobs Found', value: jobs.length, icon: JobIcon, color: 'volt' },
-    { label: 'Contacts Found', value: contacts.length, icon: PeopleIcon, color: 'pulse' },
-    { label: 'Total Spent', value: `$${(totalSpent + totalWorkflowSpent).toFixed(4)}`, icon: CostIcon, color: 'ink' },
+  const statItems = [
+    { label: 'Workflows', value: workflows.length || stats.workflows || 0, icon: WorkflowIcon, color: 'signal' },
+    { label: 'Jobs Found', value: stats.jobs || jobs.length || 0, icon: JobIcon, color: 'volt' },
+    { label: 'Contacts Found', value: stats.contacts || contacts.length || 0, icon: PeopleIcon, color: 'pulse' },
+    { label: 'Total Spent', value: `$${(stats.totalSpent || totalWorkflowSpent).toFixed(4)}`, icon: CostIcon, color: 'ink' },
   ]
 
   const getStatusBadge = (status) => {
@@ -120,7 +196,7 @@ export default function Dashboard({ jobs: propJobs, contacts: propContacts, onNa
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {stats.map((stat, index) => (
+        {statItems.map((stat, index) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 20 }}
@@ -132,7 +208,7 @@ export default function Dashboard({ jobs: propJobs, contacts: propContacts, onNa
               <stat.icon className={`w-5 h-5 text-${stat.color}-400`} />
             </div>
             <div className="text-2xl font-display font-bold text-white mb-1">
-              {loading ? '...' : stat.value}
+              {stat.value}
             </div>
             <div className="text-sm text-ink-400">{stat.label}</div>
           </motion.div>
@@ -167,7 +243,7 @@ export default function Dashboard({ jobs: propJobs, contacts: propContacts, onNa
                 Agent Workflows
               </h3>
               <button
-                onClick={fetchData}
+                onClick={refreshCurrentView}
                 className="btn-ghost text-sm"
               >
                 <RefreshIcon className="w-4 h-4" />
@@ -175,7 +251,7 @@ export default function Dashboard({ jobs: propJobs, contacts: propContacts, onNa
               </button>
             </div>
             
-            {loading ? (
+            {loadingWorkflows ? (
               <LoadingCards count={4} />
             ) : workflows.length > 0 ? (
               <div className="space-y-3">
@@ -202,7 +278,7 @@ export default function Dashboard({ jobs: propJobs, contacts: propContacts, onNa
               <JobIcon className="w-5 h-5 text-volt-400" />
               All Jobs
             </h3>
-            {loading ? (
+            {loadingJobs ? (
               <LoadingCards count={6} />
             ) : jobs.length > 0 ? (
               <div className="grid gap-4">
@@ -222,7 +298,7 @@ export default function Dashboard({ jobs: propJobs, contacts: propContacts, onNa
               <PeopleIcon className="w-5 h-5 text-pulse-400" />
               All Contacts
             </h3>
-            {loading ? (
+            {loadingContacts ? (
               <LoadingCards count={6} />
             ) : contacts.length > 0 ? (
               <div className="grid md:grid-cols-2 gap-4">
@@ -242,7 +318,7 @@ export default function Dashboard({ jobs: propJobs, contacts: propContacts, onNa
               <CostIcon className="w-5 h-5 text-ink-400" />
               Transaction History
             </h3>
-            {loading ? (
+            {loadingReceipts ? (
               <LoadingCards count={4} />
             ) : receipts.length > 0 ? (
               <div className="overflow-x-auto">

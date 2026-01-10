@@ -98,6 +98,33 @@ app.get('/health', (req, res) => {
 });
 
 /**
+ * Quick stats endpoint for dashboard - uses countDocuments for speed
+ */
+app.get('/api/stats', async (req, res) => {
+  try {
+    const [jobsCount, contactsCount, receiptsCount, workflowsCount, totalSpentResult] = await Promise.all([
+      Job.countDocuments(),
+      Contact.countDocuments(),
+      Receipt.countDocuments(),
+      Workflow.countDocuments(),
+      Receipt.aggregate([{ $group: { _id: null, total: { $sum: '$amount_paid_usd' } } }])
+    ]);
+
+    const totalSpent = totalSpentResult[0]?.total || 0;
+
+    res.json({
+      jobs: jobsCount,
+      contacts: contactsCount,
+      receipts: receiptsCount,
+      workflows: workflowsCount,
+      totalSpent
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * Upload and parse resume (PDF, DOCX, or TXT)
  */
 app.post('/api/resume/upload', upload.single('resume'), async (req, res) => {
