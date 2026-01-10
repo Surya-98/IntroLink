@@ -55,17 +55,18 @@ export class AgentOrchestrator extends EventEmitter {
    * @returns {Promise<Object>} - Workflow object with ID
    */
   async startWorkflow(params) {
-    const { resumeText, targetRoles, targetLocations = [], preferences = {} } = params;
+    const { resumeText, targetRoles, targetCompanies = [], targetLocations = [], preferences = {} } = params;
 
     if (!resumeText || !targetRoles?.length) {
       throw new Error('Resume text and at least one target role are required');
     }
 
-    console.log(`[Agent] Starting workflow for ${targetRoles.length} roles`);
+    console.log(`[Agent] Starting workflow for ${targetRoles.length} roles${targetCompanies.length ? ` at ${targetCompanies.length} companies` : ''}`);
 
     // Create workflow record
     const workflow = await Workflow.create({
       target_roles: targetRoles,
+      target_companies: targetCompanies,
       target_locations: targetLocations,
       preferences: {
         work_arrangement: preferences.workArrangement,
@@ -89,7 +90,7 @@ export class AgentOrchestrator extends EventEmitter {
     });
 
     // Execute workflow asynchronously
-    this.executeWorkflow(workflow._id.toString(), resumeText, targetRoles, targetLocations, preferences)
+    this.executeWorkflow(workflow._id.toString(), resumeText, targetRoles, targetCompanies, targetLocations, preferences)
       .catch(error => {
         console.error(`[Agent] Workflow ${workflow._id} failed:`, error);
         this.emit('error', { workflowId: workflow._id, error: error.message });
@@ -105,7 +106,7 @@ export class AgentOrchestrator extends EventEmitter {
   /**
    * Execute the full workflow pipeline
    */
-  async executeWorkflow(workflowId, resumeText, targetRoles, targetLocations, preferences) {
+  async executeWorkflow(workflowId, resumeText, targetRoles, targetCompanies, targetLocations, preferences) {
     const workflowState = this.activeWorkflows.get(workflowId);
     if (!workflowState) {
       throw new Error('Workflow not found');
@@ -167,6 +168,7 @@ export class AgentOrchestrator extends EventEmitter {
         // ----------------------------------------
         const jobsForRole = await this.searchJobsForRole(
           role, 
+          targetCompanies,
           targetLocations, 
           preferences,
           workflowId
@@ -367,21 +369,25 @@ export class AgentOrchestrator extends EventEmitter {
   /**
    * Search for jobs matching a specific role
    */
-  async searchJobsForRole(role, locations, preferences, workflowId) {
+  async searchJobsForRole(role, companies, locations, preferences, workflowId) {
     const jobs = [];
     let totalCost = 0;
     const searchLocations = locations.length > 0 ? locations : [null];
+    const searchCompanies = companies.length > 0 ? companies : [null];
 
-    for (const location of searchLocations) {
-      try {
-        const searchParams = {
-          keywords: role,
-          location: location,
-          limit: preferences.maxJobsPerRole || this.config.maxJobsPerRole,
-          workArrangement: preferences.workArrangement,
-          seniorityLevel: preferences.seniorityLevel,
-          datePosted: preferences.datePosted || 'past-week'
-        };
+    // Search across all company/location combinations
+    for (const company of searchCompanies) {
+      for (const location of searchLocations) {
+        try {
+          const searchParams = {
+            keywords: role,
+            company: company,
+            location: location,
+            limit: preferences.maxJobsPerRole || this.config.maxJobsPerRole,
+            workArrangement: preferences.workArrangement,
+            seniorityLevel: preferences.seniorityLevel,
+            datePosted: preferences.datePosted || 'past-week'
+          };
 
         const result = await x402.executeWithQuoteSweep(
           'job_search',
@@ -389,17 +395,18 @@ export class AgentOrchestrator extends EventEmitter {
           this.config.jobSearchStrategy
         );
 
-        if (result.success && result.result?.jobs) {
-          jobs.push(...result.result.jobs);
-          totalCost += result.receipt?.amount_paid_usd || 0;
+          if (result.success && result.result?.jobs) {
+            jobs.push(...result.result.jobs);
+            totalCost += result.receipt?.amount_paid_usd || 0;
+          }
+
+        } catch (error) {
+          console.error(`[Agent] Job search error for ${role}${company ? ` at ${company}` : ''} in ${location}:`, error.message);
+          await this.logWorkflowError(workflowId, 'job_search', error.message);
         }
 
-      } catch (error) {
-        console.error(`[Agent] Job search error for ${role} in ${location}:`, error.message);
-        await this.logWorkflowError(workflowId, 'job_search', error.message);
+        await this.delay(this.config.delayBetweenSearches);
       }
-
-      await this.delay(this.config.delayBetweenSearches);
     }
 
     // Deduplicate jobs by job_id

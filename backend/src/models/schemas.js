@@ -237,6 +237,7 @@ const workflowSchema = new mongoose.Schema({
   // User inputs
   resume_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Resume' },
   target_roles: [{ type: String }],
+  target_companies: [{ type: String }],
   target_locations: [{ type: String }],
   preferences: {
     work_arrangement: { type: String }, // remote, hybrid, on-site

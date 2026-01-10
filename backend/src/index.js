@@ -718,6 +718,7 @@ app.post('/api/agent/start', async (req, res) => {
     const {
       resumeText,
       targetRoles,
+      targetCompanies,
       targetLocations,
       preferences
     } = req.body;
@@ -742,6 +743,7 @@ app.post('/api/agent/start', async (req, res) => {
     const result = await orchestrator.startWorkflow({
       resumeText,
       targetRoles,
+      targetCompanies: targetCompanies || [],
       targetLocations: targetLocations || [],
       preferences: preferences || {}
     });

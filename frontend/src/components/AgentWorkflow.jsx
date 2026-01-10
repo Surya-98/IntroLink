@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 export default function AgentWorkflow() {
   const [resumeText, setResumeText] = useState('')
   const [targetRoles, setTargetRoles] = useState('')
+  const [targetCompanies, setTargetCompanies] = useState('')
   const [targetLocations, setTargetLocations] = useState('')
   const [workArrangement, setWorkArrangement] = useState('')
   const [seniorityLevel, setSeniorityLevel] = useState('')
@@ -63,6 +64,7 @@ export default function AgentWorkflow() {
 
     try {
       const locations = targetLocations.split(',').map(l => l.trim()).filter(Boolean)
+      const companies = targetCompanies.split(',').map(c => c.trim()).filter(Boolean)
       
       const res = await fetch('/api/agent/start', {
         method: 'POST',
@@ -70,6 +72,7 @@ export default function AgentWorkflow() {
         body: JSON.stringify({
           resumeText,
           targetRoles: roles,
+          targetCompanies: companies.length > 0 ? companies : undefined,
           targetLocations: locations.length > 0 ? locations : undefined,
           preferences: {
             workArrangement: workArrangement || undefined,
@@ -189,6 +192,22 @@ export default function AgentWorkflow() {
                 disabled={loading || (status?.workflow?.status && !['completed', 'failed', 'cancelled'].includes(status.workflow.status))}
               />
               <p className="text-xs text-ink-500">Comma-separated list of job titles you're targeting</p>
+            </div>
+
+            {/* Target Companies */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-ink-300">
+                Target Companies
+              </label>
+              <input
+                type="text"
+                value={targetCompanies}
+                onChange={(e) => setTargetCompanies(e.target.value)}
+                placeholder="e.g., Google, Meta, Stripe, OpenAI"
+                className="w-full input-dark"
+                disabled={loading || (status?.workflow?.status && !['completed', 'failed', 'cancelled'].includes(status.workflow.status))}
+              />
+              <p className="text-xs text-ink-500">Comma-separated list of companies (leave empty to search all)</p>
             </div>
 
             {/* Target Locations */}
