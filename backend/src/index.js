@@ -4,7 +4,8 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import { x402 } from './services/x402Protocol.js';
 import { PeopleFinderTool, MockPeopleFinderTool } from './services/peopleFinder.js';
-import { Offer, Receipt, Contact } from './models/schemas.js';
+import { JobFinderTool, MockJobFinderTool } from './services/jobFinder.js';
+import { Offer, Receipt, Contact, Job } from './models/schemas.js';
 
 dotenv.config();
 
@@ -23,12 +24,21 @@ const initializeTools = () => {
     const realPeopleFinder = new PeopleFinderTool(APIFY_TOKEN);
     x402.registerProvider('people-finder-exa', realPeopleFinder);
     console.log('✓ Registered real People Finder (Apify Exa)');
+    
+    // Register real LinkedIn Job Finder
+    const realJobFinder = new JobFinderTool(APIFY_TOKEN);
+    x402.registerProvider('job-finder-linkedin', realJobFinder);
+    console.log('✓ Registered real LinkedIn Job Finder (Apify)');
   }
   
   // Always register mock provider for testing/comparison
   const mockPeopleFinder = new MockPeopleFinderTool();
   x402.registerProvider('people-finder-mock', mockPeopleFinder);
   console.log('✓ Registered mock People Finder');
+  
+  const mockJobFinder = new MockJobFinderTool();
+  x402.registerProvider('job-finder-mock', mockJobFinder);
+  console.log('✓ Registered mock Job Finder');
 };
 
 // ============================================
@@ -169,6 +179,215 @@ app.post('/api/people-finder/search', async (req, res) => {
   }
 });
 
+// ============================================
+// Job Finder Routes (LinkedIn Job Search)
+// ============================================
+
+/**
+ * Get quote for job search (402 Payment Required simulation)
+ */
+app.post('/api/job-finder/quote', async (req, res) => {
+  try {
+    const { 
+      keywords, 
+      location, 
+      company,
+      workArrangement,
+      seniorityLevel,
+      employmentType,
+      easyApplyOnly,
+      datePosted,
+      limit = 25,
+      provider = 'job-finder-linkedin'
+    } = req.body;
+
+    const quote = await x402.requestQuote(provider, {
+      keywords,
+      location,
+      company,
+      workArrangement,
+      seniorityLevel,
+      employmentType,
+      easyApplyOnly,
+      datePosted,
+      limit
+    });
+
+    res.status(402).json({
+      message: 'Payment Required',
+      quote
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Sweep quotes from all job search providers
+ */
+app.post('/api/job-finder/sweep', async (req, res) => {
+  try {
+    const { 
+      keywords, 
+      location, 
+      company,
+      workArrangement,
+      seniorityLevel,
+      limit = 25
+    } = req.body;
+
+    const quotes = await x402.sweepQuotes('job_search', {
+      keywords,
+      location,
+      company,
+      workArrangement,
+      seniorityLevel,
+      limit
+    });
+
+    res.json({
+      message: 'Quotes collected',
+      total_providers: quotes.length,
+      quotes: quotes.map(q => ({
+        offer_id: q.offer_id,
+        provider: q.provider,
+        price_usd: q.price_usd,
+        latency_estimate_ms: q.latency_estimate_ms,
+        reliability_score: q.reliability_score,
+        x402_headers: q.x402_response.headers
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Full job search flow: sweep quotes, pay best, execute
+ */
+app.post('/api/job-finder/search', async (req, res) => {
+  try {
+    const { 
+      keywords, 
+      location, 
+      company,
+      workArrangement,
+      seniorityLevel,
+      employmentType,
+      easyApplyOnly,
+      datePosted,
+      limit = 25,
+      strategy = 'cheapest' // cheapest, fastest, reliable, balanced
+    } = req.body;
+
+    console.log(`[API] Job search request: keywords="${keywords}", location="${location}"`);
+
+    const result = await x402.executeWithQuoteSweep(
+      'job_search',
+      { 
+        keywords, 
+        location, 
+        company, 
+        workArrangement,
+        seniorityLevel,
+        employmentType,
+        easyApplyOnly,
+        datePosted,
+        limit 
+      },
+      strategy
+    );
+
+    // Save jobs to database
+    if (result.success && result.result.jobs) {
+      const costPerJob = result.receipt.amount_paid_usd / result.result.jobs.length;
+      
+      for (const job of result.result.jobs) {
+        await Job.create({
+          ...job,
+          source: result.receipt.provider,
+          cost_usd: costPerJob,
+          receipt_id: result.receipt.id
+        });
+      }
+    }
+
+    res.json({
+      message: 'Job search completed',
+      jobs: result.result.jobs,
+      total_found: result.result.jobs?.length || 0,
+      receipt: result.receipt,
+      quote_sweep: result.quote_sweep,
+      search_params: result.result.searchParams
+    });
+  } catch (error) {
+    console.error('[API] Job search error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get all saved jobs
+ */
+app.get('/api/jobs', async (req, res) => {
+  try {
+    const { 
+      keywords, 
+      location, 
+      company, 
+      workArrangement,
+      limit = 100 
+    } = req.query;
+
+    const filter = {};
+    if (keywords) filter.search_keywords = new RegExp(keywords, 'i');
+    if (location) filter.location = new RegExp(location, 'i');
+    if (company) filter.company_name = new RegExp(company, 'i');
+    if (workArrangement) filter.work_arrangement = workArrangement;
+
+    const jobs = await Job.find(filter)
+      .sort({ created_at: -1 })
+      .limit(parseInt(limit));
+    
+    res.json({ 
+      jobs,
+      total: jobs.length
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get job by ID with cost provenance
+ */
+app.get('/api/jobs/:id/provenance', async (req, res) => {
+  try {
+    const job = await Job.findById(req.params.id).populate('receipt_id');
+    
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    res.json({
+      job,
+      provenance: {
+        source: job.source,
+        cost_usd: job.cost_usd,
+        search_keywords: job.search_keywords,
+        receipt: job.receipt_id ? {
+          transaction_id: job.receipt_id.transaction_id,
+          total_paid: job.receipt_id.amount_paid_usd,
+          provider: job.receipt_id.provider,
+          timestamp: job.receipt_id.created_at
+        } : null
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /**
  * Get all offers (including rejected)
  */
@@ -252,14 +471,22 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`\n🚀 IntroLink API running on http://localhost:${PORT}`);
       console.log(`\n📋 Available endpoints:`);
+      console.log(`\n   People Finder:`);
       console.log(`   POST /api/people-finder/quote   - Get a quote (402)`);
       console.log(`   POST /api/people-finder/sweep   - Sweep quotes from all providers`);
-      console.log(`   POST /api/pay/:offerId          - Pay and execute`);
       console.log(`   POST /api/people-finder/search  - Full flow with quote sweep`);
+      console.log(`\n   Job Finder (LinkedIn):`);
+      console.log(`   POST /api/job-finder/quote      - Get a job search quote (402)`);
+      console.log(`   POST /api/job-finder/sweep      - Sweep quotes from job providers`);
+      console.log(`   POST /api/job-finder/search     - Full job search flow`);
+      console.log(`   GET  /api/jobs                  - List saved jobs (with filters)`);
+      console.log(`   GET  /api/jobs/:id/provenance   - Get job with cost provenance`);
+      console.log(`\n   General:`);
+      console.log(`   POST /api/pay/:offerId          - Pay and execute`);
       console.log(`   GET  /api/offers                - List all offers`);
       console.log(`   GET  /api/receipts              - List all receipts`);
       console.log(`   GET  /api/contacts              - List all contacts`);
-      console.log(`\n💡 Set APIFY_TOKEN env var to use real Exa People Search`);
+      console.log(`\n💡 Set APIFY_TOKEN env var to use real Apify APIs`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
