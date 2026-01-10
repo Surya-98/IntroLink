@@ -181,7 +181,9 @@ export default function PeopleFinder({ onContactsFound }) {
             </svg>
             <p className="text-sm text-ink-400">
               {!useCustomQuery 
-                ? "We'll find recruiters, talent acquisition partners, and hiring managers at the specified company who can help with your target role."
+                ? role.trim() 
+                  ? "We'll find people in the specified role and related positions at the company, including senior staff and hiring managers."
+                  : "We'll find recruiters, talent acquisition partners, and hiring managers at the specified company."
                 : "Use natural language to describe who you're looking for. Our AI will find relevant professionals matching your criteria."
               }
             </p>

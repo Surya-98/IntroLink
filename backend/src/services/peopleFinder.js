@@ -64,37 +64,61 @@ export class PeopleFinderTool {
   }
 
   /**
-   * Build search query for finding recruiters/hiring managers
+   * Build search query for finding people at a company
+   * If a target role is specified, find people in that role
+   * Otherwise, find recruiters/hiring managers
    */
   buildSearchQuery(params) {
     const { role, company, department } = params;
     
-    // Build intelligent query for recruiting contacts
     const queryParts = [];
     
     if (company) {
       queryParts.push(`"${company}"`);
     }
     
-    // Target recruiters or hiring managers
-    const targetRoles = [
-      'recruiter',
-      'talent acquisition',
-      'hiring manager',
-      'engineering manager',
-      'HR',
-      'people operations'
-    ];
-    
     if (role) {
-      // For engineering roles, also look for engineering managers
-      if (role.toLowerCase().includes('engineer') || role.toLowerCase().includes('developer')) {
-        queryParts.push('(recruiter OR "talent acquisition" OR "engineering manager" OR "hiring manager")');
+      // When a specific role is provided, search for people in that role
+      // Also include related hiring roles for that position
+      const roleLower = role.toLowerCase();
+      
+      // Build role-specific search terms
+      const roleTerms = [`"${role}"`];
+      
+      // Add related titles based on the role type
+      if (roleLower.includes('scientist') || roleLower.includes('researcher')) {
+        roleTerms.push(`"${role.replace(/scientist/i, 'lead')}"`);
+        roleTerms.push(`"senior ${role}"`);
+        roleTerms.push(`"staff ${role}"`);
+        roleTerms.push(`"principal ${role}"`);
+        roleTerms.push('"research manager"');
+        roleTerms.push('"research director"');
+      } else if (roleLower.includes('engineer') || roleLower.includes('developer')) {
+        roleTerms.push(`"senior ${role}"`);
+        roleTerms.push(`"staff ${role}"`);
+        roleTerms.push('"engineering manager"');
+        roleTerms.push('"tech lead"');
+      } else if (roleLower.includes('manager')) {
+        roleTerms.push(`"senior ${role}"`);
+        roleTerms.push(`"director"`);
+      } else if (roleLower.includes('designer')) {
+        roleTerms.push(`"senior ${role}"`);
+        roleTerms.push('"design manager"');
+        roleTerms.push('"head of design"');
+      } else if (roleLower.includes('product')) {
+        roleTerms.push(`"senior ${role}"`);
+        roleTerms.push('"product lead"');
+        roleTerms.push('"group product manager"');
       } else {
-        queryParts.push('(recruiter OR "talent acquisition" OR "hiring manager")');
+        // For other roles, include senior variant and generic hiring terms
+        roleTerms.push(`"senior ${role}"`);
+        roleTerms.push(`"head of ${role.split(' ').pop()}"`);
       }
+      
+      queryParts.push(`(${roleTerms.join(' OR ')})`);
     } else {
-      queryParts.push('(recruiter OR "talent acquisition")');
+      // No specific role - default to recruiters/talent acquisition
+      queryParts.push('(recruiter OR "talent acquisition" OR "hiring manager")');
     }
     
     if (department) {

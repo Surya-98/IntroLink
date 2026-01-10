@@ -3,9 +3,10 @@ import Header from './components/Header'
 import JobFinder from './components/JobFinder'
 import PeopleFinder from './components/PeopleFinder'
 import Dashboard from './components/Dashboard'
+import AgentWorkflow from './components/AgentWorkflow'
 
 function App() {
-  const [activeTab, setActiveTab] = useState('jobs')
+  const [activeTab, setActiveTab] = useState('agent')
   const [savedJobs, setSavedJobs] = useState([])
   const [savedContacts, setSavedContacts] = useState([])
 
@@ -29,6 +30,10 @@ function App() {
         <Header activeTab={activeTab} setActiveTab={setActiveTab} />
         
         <main className="max-w-7xl mx-auto px-6 py-8">
+          {activeTab === 'agent' && (
+            <AgentWorkflow />
+          )}
+          
           {activeTab === 'jobs' && (
             <JobFinder onJobsFound={handleJobsFound} />
           )}
