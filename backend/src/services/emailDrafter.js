@@ -19,7 +19,7 @@ export class EmailDrafterService {
   }
 
   /**
-   * Generate a personalized outreach email
+   * Generate a personalized outreach email using streaming
    */
   async generateEmail(params) {
     const { resumeText, job, contact } = params;
@@ -42,28 +42,30 @@ export class EmailDrafterService {
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
           ],
-          max_tokens: 1000,
+          max_tokens: 20000,
           temperature: 0.7,
-          top_p: 0.9
+          top_p: 0.9,
+          stream: true
         },
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
-          }
+          },
+          responseType: 'stream'
         }
       );
 
-      const result = response.data;
-      const content = result.choices[0]?.message?.content || '';
+      // Collect streamed content
+      const content = await this.collectStreamedResponse(response.data);
       
       // Parse subject and body from the response
       const { subject, body } = this.parseEmailResponse(content);
       
-      // Calculate cost
-      const promptTokens = result.usage?.prompt_tokens || 0;
-      const completionTokens = result.usage?.completion_tokens || 0;
-      const cost = (promptTokens * this.inputTokenCost) + (completionTokens * this.outputTokenCost);
+      // Estimate tokens (streaming doesn't always return usage)
+      const estimatedPromptTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4);
+      const estimatedCompletionTokens = Math.ceil(content.length / 4);
+      const cost = (estimatedPromptTokens * this.inputTokenCost) + (estimatedCompletionTokens * this.outputTokenCost);
 
       return {
         success: true,
@@ -72,8 +74,8 @@ export class EmailDrafterService {
         raw_response: content,
         metadata: {
           model: this.model,
-          prompt_tokens: promptTokens,
-          completion_tokens: completionTokens,
+          prompt_tokens: estimatedPromptTokens,
+          completion_tokens: estimatedCompletionTokens,
           cost_usd: Math.round(cost * 1000000) / 1000000 // Round to 6 decimals
         }
       };
@@ -82,6 +84,50 @@ export class EmailDrafterService {
       console.error('[EmailDrafter] Error:', error.response?.data || error.message);
       throw new Error(`Email generation failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Collect and parse SSE stream response
+   */
+  async collectStreamedResponse(stream) {
+    return new Promise((resolve, reject) => {
+      let content = '';
+      let buffer = '';
+
+      stream.on('data', (chunk) => {
+        buffer += chunk.toString();
+        
+        // Process complete SSE messages
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') {
+              continue;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed.choices?.[0]?.delta?.content;
+              if (delta) {
+                content += delta;
+              }
+            } catch (e) {
+              // Ignore JSON parse errors for incomplete chunks
+            }
+          }
+        }
+      });
+
+      stream.on('end', () => {
+        resolve(content);
+      });
+
+      stream.on('error', (err) => {
+        reject(err);
+      });
+    });
   }
 
   /**
@@ -199,49 +245,82 @@ BODY:
   cleanEmailBody(body) {
     if (!body) return body;
 
-    // Remove numbered reasoning steps (1. **, 2. **, etc.)
-    // These are chain-of-thought artifacts from the LLM
-    const reasoningPatterns = [
-      /^\d+\.\s+\*\*.*?\*\*[\s\S]*?(?=\n\n|\nHi\s|\nHello\s|\nDear\s|$)/gm,  // "1. **Analyze**..." patterns
-      /^\*\s+\*\*.*?\*\*.*$/gm,  // "* **Key point**..." patterns
-      /^#{1,3}\s+.+$/gm,  // Markdown headers in reasoning
-    ];
-
     let cleanedBody = body;
     
-    // Find where the actual email starts (usually with a greeting)
-    const greetingMatch = cleanedBody.match(/\n?(Hi\s+\w+|Hello\s+\w+|Dear\s+\w+)/i);
-    if (greetingMatch && greetingMatch.index !== undefined) {
-      // Check if there's reasoning content before the greeting
-      const beforeGreeting = cleanedBody.substring(0, greetingMatch.index);
-      if (beforeGreeting.match(/\d+\.\s+\*\*|\*\s+\*\*|^#+\s/m)) {
-        // There's reasoning before the greeting, extract from greeting onwards
-        cleanedBody = cleanedBody.substring(greetingMatch.index).trim();
+    // First, try to find where the actual email starts (usually with a greeting)
+    // Look for common greeting patterns
+    const greetingPatterns = [
+      /^(Hi\s+\w+)/im,
+      /^(Hello\s+\w+)/im,
+      /^(Dear\s+\w+)/im,
+      /^(Hey\s+\w+)/im,
+    ];
+
+    let emailStart = -1;
+    for (const pattern of greetingPatterns) {
+      const match = cleanedBody.match(pattern);
+      if (match && match.index !== undefined) {
+        // Check if there's chain-of-thought content before this
+        const beforeGreeting = cleanedBody.substring(0, match.index);
+        const hasReasoning = beforeGreeting.match(/\d+\.\s+\*\*|\*\s+\*\*|^#+\s|Analyze|Drafting|Iteration|Refining|Checking/m);
+        if (hasReasoning || beforeGreeting.length > 50) {
+          emailStart = match.index;
+          break;
+        }
       }
     }
 
-    // Remove any trailing reasoning (often starts with numbered items or bullet points after sign-off)
+    // If we found reasoning before the greeting, extract from greeting onwards
+    if (emailStart > 0) {
+      cleanedBody = cleanedBody.substring(emailStart).trim();
+    }
+
+    // Find and cut at sign-off (don't include anything after)
     const signOffPatterns = [
-      /Best,?\s*$/i,
-      /Best regards,?\s*$/i,
-      /Sincerely,?\s*$/i,
-      /Thanks,?\s*$/i,
-      /Thank you,?\s*$/i,
-      /Warm regards,?\s*$/i,
-      /Cheers,?\s*$/i,
+      /(Best,?\s*)$/im,
+      /(Best regards,?\s*)$/im,
+      /(Sincerely,?\s*)$/im,
+      /(Thanks,?\s*)$/im,
+      /(Thank you,?\s*)$/im,
+      /(Warm regards,?\s*)$/im,
+      /(Cheers,?\s*)$/im,
+      /(Looking forward,?\s*)$/im,
     ];
 
-    for (const pattern of signOffPatterns) {
-      const match = cleanedBody.match(pattern);
-      if (match && match.index !== undefined) {
-        // Keep everything up to and including the sign-off
-        cleanedBody = cleanedBody.substring(0, match.index + match[0].length);
+    // Find sign-off in the body, searching from the end
+    const lines = cleanedBody.split('\n');
+    let signOffIndex = -1;
+    
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      for (const pattern of signOffPatterns) {
+        if (pattern.test(line)) {
+          signOffIndex = i;
+          break;
+        }
+      }
+      if (signOffIndex >= 0) break;
+      
+      // Also check for standalone sign-offs like "Best," on its own line
+      if (/^(Best|Thanks|Cheers|Sincerely|Warm regards|Best regards|Thank you|Looking forward),?\s*$/i.test(line)) {
+        signOffIndex = i;
         break;
       }
     }
 
-    // Remove any remaining chain-of-thought numbering at the start
+    if (signOffIndex >= 0) {
+      cleanedBody = lines.slice(0, signOffIndex + 1).join('\n');
+    }
+
+    // Remove any remaining chain-of-thought artifacts
+    // Remove numbered reasoning at start of lines
     cleanedBody = cleanedBody.replace(/^\d+\.\s+\*\*[^*]+\*\*:?\s*/gm, '');
+    // Remove markdown headers
+    cleanedBody = cleanedBody.replace(/^#{1,3}\s+.+\n?/gm, '');
+    // Remove bullet point reasoning
+    cleanedBody = cleanedBody.replace(/^\*\s+\*\*[^*]+\*\*:?\s*.*/gm, '');
+    // Remove lines that are clearly reasoning/analysis
+    cleanedBody = cleanedBody.replace(/^(Analyze|Analysis|Drafting|Refining|Checking|Strategy|Hook|Credibility|CTA|Constraints):?\s*.*/gim, '');
     
     // Clean up extra whitespace
     cleanedBody = cleanedBody.replace(/\n{3,}/g, '\n\n').trim();
