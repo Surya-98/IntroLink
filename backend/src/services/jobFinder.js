@@ -68,6 +68,11 @@ export class JobFinderTool {
 
   /**
    * Build search input for the Apify actor
+   * Uses the Advanced LinkedIn Job Search API parameters:
+   * - titleSearch: Search in job title
+   * - locationSearch: Search in job location  
+   * - organizationSlugFilter: Filter by company LinkedIn slug
+   * - remoteFilter: Filter for remote jobs
    */
   buildSearchInput(params) {
     const {
@@ -86,31 +91,31 @@ export class JobFinderTool {
       limit,
     };
 
-    // Keywords/title search
+    // Title search - search in job title (must be array)
     if (keywords) {
-      input.keywords = keywords;
+      input.titleSearch = [keywords];
     }
 
-    // Location filter
+    // Location search - search in job location (must be array)
     if (location) {
-      input.location = location;
+      // Don't use abbreviations - expand common ones
+      const locationExpanded = this.expandLocation(location);
+      input.locationSearch = [locationExpanded];
     }
 
-    // Company filter
+    // Company search - use organizationSearch (searches company name)
     if (company) {
-      input.companyName = company;
+      input.organizationSearch = [company];
     }
 
-    // Work arrangement filter (remote/hybrid/on-site)
-    if (workArrangement) {
-      const workArrangementMap = {
-        'remote': 'remote',
-        'hybrid': 'hybrid',
-        'on-site': 'on-site',
-        'onsite': 'on-site'
-      };
-      input.workArrangement = workArrangementMap[workArrangement.toLowerCase()] || workArrangement;
+    // Remote filter
+    if (workArrangement === 'remote') {
+      input.remote = true;
     }
+    
+    // Include AI enrichments
+    input.includeAi = true;
+    input.descriptionType = 'text';
 
     // Seniority level filter
     if (seniorityLevel) {
@@ -150,6 +155,88 @@ export class JobFinderTool {
     }
 
     return input;
+  }
+
+  /**
+   * Expand location abbreviations
+   */
+  expandLocation(location) {
+    const abbreviations = {
+      'US': 'United States',
+      'USA': 'United States',
+      'UK': 'United Kingdom',
+      'NY': 'New York',
+      'CA': 'California',
+      'TX': 'Texas',
+      'SF': 'San Francisco',
+      'LA': 'Los Angeles',
+      'DC': 'Washington DC',
+    };
+    
+    // Check if it's a known abbreviation
+    const upper = location.toUpperCase().trim();
+    return abbreviations[upper] || location;
+  }
+
+  /**
+   * Convert company name to LinkedIn slug format
+   * e.g., "Mongo DB" -> "mongodb", "Google Inc" -> "google"
+   */
+  companyNameToSlug(company) {
+    // Common company name to slug mappings
+    const knownSlugs = {
+      'mongodb': 'mongodb',
+      'mongo db': 'mongodb',
+      'google': 'google',
+      'meta': 'meta',
+      'facebook': 'meta',
+      'amazon': 'amazon',
+      'apple': 'apple',
+      'microsoft': 'microsoft',
+      'netflix': 'netflix',
+      'stripe': 'stripe',
+      'openai': 'openai',
+      'anthropic': 'anthropic',
+      'tesla': 'tesla-motors',
+      'uber': 'uber-com',
+      'airbnb': 'airbnb',
+      'linkedin': 'linkedin',
+      'salesforce': 'salesforce',
+      'adobe': 'adobe',
+      'nvidia': 'nvidia',
+      'intel': 'intel-corporation',
+      'ibm': 'ibm',
+      'oracle': 'oracle',
+      'spotify': 'spotify',
+      'twitter': 'twitter',
+      'x': 'x',
+      'snap': 'snap-inc',
+      'snapchat': 'snap-inc',
+      'pinterest': 'pinterest',
+      'reddit': 'reddit-com',
+      'dropbox': 'dropbox',
+      'slack': 'slack',
+      'zoom': 'zoom-video-communications',
+      'coinbase': 'coinbase',
+      'robinhood': 'robinhood',
+      'doordash': 'doordash',
+      'instacart': 'instacart',
+      'lyft': 'lyft',
+    };
+
+    const normalized = company.toLowerCase().trim();
+    
+    // Check known mappings first
+    if (knownSlugs[normalized]) {
+      return knownSlugs[normalized];
+    }
+
+    // Convert to slug format: lowercase, replace spaces with hyphens, remove special chars
+    return normalized
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
   }
 
   /**
@@ -338,7 +425,7 @@ export class MockJobFinderTool {
     this.name = 'LinkedIn Job Finder (Mock)';
     this.type = 'job_search';
     this.providerName = 'mock-job-provider';
-    this.basePriceUsd = 0.01;
+    this.basePriceUsd = 100.00; // Expensive fallback - real Apify provider will be preferred
     this.avgLatencyMs = 500;
     this.reliabilityScore = 0.99;
   }

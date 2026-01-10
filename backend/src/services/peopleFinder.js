@@ -326,7 +326,7 @@ export class MockPeopleFinderTool {
     this.name = 'People Finder (Mock)';
     this.type = 'people_search';
     this.providerName = 'mock-provider';
-    this.basePriceUsd = 0.01;
+    this.basePriceUsd = 100.00; // Expensive fallback - real Apify provider will be preferred
     this.avgLatencyMs = 500;
     this.reliabilityScore = 0.99;
   }

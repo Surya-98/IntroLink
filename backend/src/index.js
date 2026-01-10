@@ -138,7 +138,12 @@ app.post('/api/people-finder/search', async (req, res) => {
       strategy = 'cheapest' // cheapest, fastest, reliable, balanced
     } = req.body;
 
-    console.log(`[API] People search request: company="${company}", role="${role}"`);
+    console.log(`[API] People search request: company="${company}", role="${role}", query="${query}"`);
+
+    // Validate input
+    if (!query && !company) {
+      return res.status(400).json({ error: 'Please provide either a company name or a search query' });
+    }
 
     const result = await x402.executeWithQuoteSweep(
       'people_search',
@@ -146,36 +151,43 @@ app.post('/api/people-finder/search', async (req, res) => {
       strategy
     );
 
+    console.log(`[API] Search completed successfully. Found ${result.result?.contacts?.length || 0} contacts`);
+
     // Save contacts to database
-    if (result.success && result.result.contacts) {
+    if (result.success && result.result.contacts && result.result.contacts.length > 0) {
       const costPerContact = result.receipt.amount_paid_usd / result.result.contacts.length;
       
       for (const contact of result.result.contacts) {
-        await Contact.create({
-          ...contact,
-          source: result.receipt.provider,
-          search_query: result.result.query,
-          cost_usd: costPerContact,
-          receipt_id: result.receipt.id
-        });
+        try {
+          await Contact.create({
+            ...contact,
+            source: result.receipt.provider,
+            search_query: result.result.query,
+            cost_usd: costPerContact,
+            receipt_id: result.receipt.id
+          });
+        } catch (dbError) {
+          console.error('[API] Failed to save contact:', dbError.message);
+        }
       }
     }
 
     res.json({
       message: 'Search completed',
-      contacts: result.result.contacts,
+      contacts: result.result?.contacts || [],
       receipt: result.receipt,
       quote_sweep: result.quote_sweep,
-      provenance: result.result.contacts?.map(c => ({
+      provenance: result.result?.contacts?.map(c => ({
         contact: c.name,
         data_source: result.receipt.provider,
         cost_usd: result.receipt.amount_paid_usd / (result.result.contacts?.length || 1),
         query_used: result.result.query
-      }))
+      })) || []
     });
   } catch (error) {
-    console.error('[API] Search error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[API] Search error:', error.message);
+    console.error('[API] Error stack:', error.stack);
+    res.status(500).json({ error: error.message || 'An unexpected error occurred' });
   }
 });
 
@@ -460,8 +472,12 @@ app.get('/api/contacts/:id/provenance', async (req, res) => {
 
 const startServer = async () => {
   try {
-    // Connect to MongoDB
-    await mongoose.connect(MONGODB_URI);
+    // Connect to MongoDB (works with both local and Atlas)
+    await mongoose.connect(MONGODB_URI, {
+      // These options work well with MongoDB Atlas
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
     console.log('✓ Connected to MongoDB');
 
     // Initialize tools
