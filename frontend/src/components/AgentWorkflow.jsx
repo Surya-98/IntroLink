@@ -472,79 +472,89 @@ export default function AgentWorkflow() {
           transition={{ delay: 0.2 }}
           className="space-y-6"
         >
-          {/* Status Card */}
+          {/* Enhanced Status Card */}
           {status && (
-            <div className="p-6 rounded-2xl bg-ink-950 border border-ink-800 space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="font-display text-xl font-semibold text-white flex items-center gap-2">
-                  <StatusIcon className="w-5 h-5 text-pulse-400" />
-                  Workflow Status
-                </h2>
-                <span className={`text-sm font-medium capitalize ${getStatusColor(status.workflow?.status)}`}>
-                  {status.workflow?.status}
-                </span>
-              </div>
-
-              {/* Progress */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-3 text-sm">
-                  {isWorkflowRunning && (
-                    <LoadingSpinner />
-                  )}
-                  <span className="text-ink-300">{getStepLabel(status.workflow?.progress?.current_step)}</span>
+            <div className="space-y-4">
+              {/* Main Status Card */}
+              <div className="p-6 rounded-2xl bg-ink-950 border border-ink-800 space-y-5">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-display text-xl font-semibold text-white flex items-center gap-2">
+                    <StatusIcon className="w-5 h-5 text-pulse-400" />
+                    Workflow Status
+                  </h2>
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold capitalize ${
+                    status.workflow?.status === 'completed' ? 'bg-volt-500/20 text-volt-400' :
+                    status.workflow?.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                    status.workflow?.status === 'cancelled' ? 'bg-ink-700/50 text-ink-400' :
+                    'bg-pulse-500/20 text-pulse-400'
+                  }`}>
+                    {isWorkflowRunning && <span className="inline-block w-1.5 h-1.5 bg-current rounded-full mr-1.5 animate-pulse" />}
+                    {status.workflow?.status}
+                  </span>
                 </div>
 
-                {status.workflow?.progress?.current_role && (
-                  <div className="text-xs text-ink-500">
-                    Current role: <span className="text-ink-300">{status.workflow.progress.current_role}</span>
-                  </div>
-                )}
+                {/* Pipeline Steps Visualization */}
+                <WorkflowPipelineSteps 
+                  currentStep={status.workflow?.progress?.current_step}
+                  currentRole={status.workflow?.progress?.current_role}
+                  status={status.workflow?.status}
+                  progress={status.workflow?.progress}
+                  isRunning={isWorkflowRunning}
+                />
 
-                {/* Progress Bar */}
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs text-ink-400">
-                    <span>Roles Progress</span>
-                    <span>{status.workflow?.progress?.roles_completed || 0} / {status.workflow?.progress?.total_roles || 0}</span>
-                  </div>
-                  <div className="h-2 bg-ink-800 rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full bg-gradient-to-r from-volt-500 to-pulse-500"
-                      initial={{ width: 0 }}
-                      animate={{ 
-                        width: `${((status.workflow?.progress?.roles_completed || 0) / (status.workflow?.progress?.total_roles || 1)) * 100}%` 
-                      }}
-                      transition={{ duration: 0.5 }}
-                    />
-                  </div>
+                {/* Stats Grid */}
+                <div className="grid grid-cols-3 gap-3">
+                  <StatCard 
+                    icon={JobIcon}
+                    value={status.summary?.jobs_count || 0}
+                    label="Jobs"
+                    color="volt"
+                    isActive={status.workflow?.progress?.current_step === 'searching_jobs'}
+                  />
+                  <StatCard 
+                    icon={PeopleIcon}
+                    value={status.summary?.contacts_count || 0}
+                    label="Contacts"
+                    color="pulse"
+                    isActive={status.workflow?.progress?.current_step === 'finding_contacts'}
+                  />
+                  <StatCard 
+                    icon={EmailIcon}
+                    value={status.summary?.emails_count || 0}
+                    label="Emails"
+                    color="signal"
+                    isActive={status.workflow?.progress?.current_step === 'drafting_emails'}
+                  />
                 </div>
 
-                {/* Stats */}
-                <div className="grid grid-cols-3 gap-4 pt-4 border-t border-ink-800">
-                  <div>
-                    <div className="text-2xl font-display font-bold text-white">
-                      {status.summary?.jobs_count || status.workflow?.progress?.total_jobs_found || 0}
-                    </div>
-                    <div className="text-xs text-ink-400">Jobs Found</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-display font-bold text-white">
-                      {status.summary?.contacts_count || status.workflow?.progress?.total_contacts_found || 0}
-                    </div>
-                    <div className="text-xs text-ink-400">Contacts</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-display font-bold text-white">
-                      {status.summary?.emails_count || status.workflow?.progress?.total_emails_drafted || 0}
-                    </div>
-                    <div className="text-xs text-ink-400">Emails</div>
-                  </div>
-                </div>
-
-                {/* Cost */}
+                {/* Cost Breakdown */}
                 {status.workflow?.total_cost_usd > 0 && (
-                  <div className="flex justify-between items-center pt-4 border-t border-ink-800">
-                    <span className="text-sm text-ink-400">Total Cost</span>
-                    <span className="font-mono text-volt-400">${status.workflow.total_cost_usd.toFixed(4)}</span>
+                  <div className="p-3 rounded-xl bg-ink-900/50 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-ink-500 uppercase tracking-wide">Cost Breakdown</span>
+                      <span className="font-mono text-sm font-bold text-volt-400">
+                        ${status.workflow.total_cost_usd.toFixed(4)}
+                      </span>
+                    </div>
+                    {status.workflow?.cost_breakdown && (
+                      <div className="flex gap-4 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2 h-2 rounded-full bg-volt-500" />
+                          <span className="text-ink-400">Jobs: </span>
+                          <span className="text-ink-300 font-mono">${(status.workflow.cost_breakdown.job_search || 0).toFixed(4)}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2 h-2 rounded-full bg-pulse-500" />
+                          <span className="text-ink-400">People: </span>
+                          <span className="text-ink-300 font-mono">${(status.workflow.cost_breakdown.people_search || 0).toFixed(4)}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2 h-2 rounded-full bg-signal-500" />
+                          <span className="text-ink-400">Emails: </span>
+                          <span className="text-ink-300 font-mono">${(status.workflow.cost_breakdown.email_generation || 0).toFixed(4)}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -553,15 +563,15 @@ export default function AgentWorkflow() {
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="p-4 rounded-xl bg-volt-500/10 border border-volt-500/30 mt-4"
+                    className="p-4 rounded-xl bg-volt-500/10 border border-volt-500/30"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-volt-500/20 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full bg-volt-500/20 flex items-center justify-center">
                           <CheckIcon className="w-5 h-5 text-volt-400" />
                         </div>
                         <div>
-                          <div className="text-volt-400 font-medium">Workflow Completed!</div>
+                          <div className="text-volt-400 font-semibold">Workflow Completed!</div>
                           <div className="text-sm text-ink-400">
                             {results.emails?.length || 0} emails ready to send
                           </div>
@@ -576,7 +586,108 @@ export default function AgentWorkflow() {
                     </div>
                   </motion.div>
                 )}
+
+                {/* Error Display */}
+                {status.workflow?.errors?.length > 0 && (
+                  <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+                    <div className="text-xs text-red-400 font-medium mb-2">Errors ({status.workflow.errors.length})</div>
+                    <div className="space-y-1 max-h-24 overflow-y-auto">
+                      {status.workflow.errors.slice(-3).map((err, i) => (
+                        <div key={i} className="text-xs text-red-300/80 flex items-start gap-2">
+                          <span className="text-red-500">•</span>
+                          <span>{err.step}: {err.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {/* Live Activity Feed */}
+              {isWorkflowRunning && status.activity_feed?.length > 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-5 rounded-2xl bg-ink-950 border border-ink-800"
+                >
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-2 h-2 bg-volt-400 rounded-full animate-pulse" />
+                    <h3 className="font-display text-sm font-semibold text-white">Live Activity</h3>
+                  </div>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    <AnimatePresence mode="popLayout">
+                      {status.activity_feed.map((item, i) => (
+                        <motion.div
+                          key={`${item.type}-${item.timestamp}-${i}`}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: 10 }}
+                          transition={{ delay: i * 0.05 }}
+                          className="flex items-start gap-3 p-2.5 rounded-lg bg-ink-900/50 hover:bg-ink-900 transition-colors"
+                        >
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                            item.type === 'job' ? 'bg-volt-500/20' :
+                            item.type === 'contact' ? 'bg-pulse-500/20' :
+                            'bg-signal-500/20'
+                          }`}>
+                            {item.type === 'job' && <JobIcon className="w-3.5 h-3.5 text-volt-400" />}
+                            {item.type === 'contact' && <PeopleIcon className="w-3.5 h-3.5 text-pulse-400" />}
+                            {item.type === 'email' && <EmailIcon className="w-3.5 h-3.5 text-signal-400" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-white truncate">{item.title}</div>
+                            <div className="text-xs text-ink-500 truncate">{item.subtitle}</div>
+                          </div>
+                          <div className="text-xs text-ink-600 flex-shrink-0">
+                            {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Recent Items Preview (when running) */}
+              {isWorkflowRunning && (status.recent?.jobs?.length > 0 || status.recent?.contacts?.length > 0) && (
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Recent Jobs */}
+                  {status.recent?.jobs?.length > 0 && (
+                    <div className="p-4 rounded-xl bg-ink-950 border border-ink-800">
+                      <div className="flex items-center gap-2 mb-3">
+                        <JobIcon className="w-4 h-4 text-volt-400" />
+                        <span className="text-xs font-semibold text-ink-400 uppercase">Latest Jobs</span>
+                      </div>
+                      <div className="space-y-2">
+                        {status.recent.jobs.slice(0, 3).map((job, i) => (
+                          <div key={i} className="text-xs">
+                            <div className="text-white truncate">{job.title}</div>
+                            <div className="text-ink-500 truncate">{job.company_name}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recent Contacts */}
+                  {status.recent?.contacts?.length > 0 && (
+                    <div className="p-4 rounded-xl bg-ink-950 border border-ink-800">
+                      <div className="flex items-center gap-2 mb-3">
+                        <PeopleIcon className="w-4 h-4 text-pulse-400" />
+                        <span className="text-xs font-semibold text-ink-400 uppercase">Latest Contacts</span>
+                      </div>
+                      <div className="space-y-2">
+                        {status.recent.contacts.slice(0, 3).map((contact, i) => (
+                          <div key={i} className="text-xs">
+                            <div className="text-white truncate">{contact.name}</div>
+                            <div className="text-ink-500 truncate">{contact.title}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Resume Info */}
               {status.resume && (
@@ -964,6 +1075,161 @@ function EmptyState({ message }) {
     <div className="text-center py-12 px-6 rounded-2xl bg-ink-950 border border-ink-800">
       <p className="text-ink-500">{message}</p>
     </div>
+  )
+}
+
+// Pipeline step visualization component
+function WorkflowPipelineSteps({ currentStep, currentRole, status, progress, isRunning }) {
+  const steps = [
+    { id: 'parsing_resume', label: 'Parse Resume', icon: FileIcon, description: 'Extracting information from resume' },
+    { id: 'searching_jobs', label: 'Find Jobs', icon: JobIcon, description: 'Searching for matching positions' },
+    { id: 'finding_contacts', label: 'Find Contacts', icon: PeopleIcon, description: 'Identifying key contacts' },
+    { id: 'drafting_emails', label: 'Draft Emails', icon: EmailIcon, description: 'Writing personalized outreach' },
+    { id: 'completed', label: 'Complete', icon: CheckIcon, description: 'All done!' },
+  ]
+
+  const getStepStatus = (stepId, index) => {
+    if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+      if (status === 'completed') return 'completed'
+      if (status === 'failed' && currentStep === stepId) return 'failed'
+      // Mark steps before the failed one as completed
+      const currentIndex = steps.findIndex(s => s.id === currentStep)
+      if (index < currentIndex) return 'completed'
+      return stepId === currentStep ? 'failed' : 'pending'
+    }
+    
+    const currentIndex = steps.findIndex(s => s.id === currentStep)
+    const stepIndex = steps.findIndex(s => s.id === stepId)
+    
+    if (stepIndex < currentIndex) return 'completed'
+    if (stepIndex === currentIndex) return 'active'
+    return 'pending'
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Current action detail */}
+      {isRunning && currentStep && currentStep !== 'completed' && (
+        <motion.div
+          key={currentStep}
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-3 p-3 rounded-xl bg-gradient-to-r from-volt-500/10 to-transparent border border-volt-500/20"
+        >
+          <div className="relative">
+            <LoadingSpinner />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm text-white font-medium">
+              {currentStep === 'parsing_resume' && 'Processing your resume...'}
+              {currentStep === 'searching_jobs' && (
+                <>Searching jobs{currentRole ? ` for "${currentRole}"` : '...'}</>
+              )}
+              {currentStep === 'finding_contacts' && 'Finding relevant contacts...'}
+              {currentStep === 'drafting_emails' && 'Generating personalized emails...'}
+            </div>
+            {currentRole && currentStep === 'searching_jobs' && (
+              <div className="text-xs text-ink-500 mt-0.5">
+                Role {(progress?.roles_completed || 0) + 1} of {progress?.total_roles || '?'}
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Step indicators */}
+      <div className="flex items-center justify-between">
+        {steps.map((step, index) => {
+          const stepStatus = getStepStatus(step.id, index)
+          const Icon = step.icon
+          
+          return (
+            <div key={step.id} className="flex items-center flex-1">
+              <div className="flex flex-col items-center">
+                <motion.div 
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+                    stepStatus === 'completed' ? 'bg-volt-500/30 text-volt-400' :
+                    stepStatus === 'active' ? 'bg-pulse-500/30 text-pulse-400 ring-2 ring-pulse-500/50' :
+                    stepStatus === 'failed' ? 'bg-red-500/30 text-red-400' :
+                    'bg-ink-800/50 text-ink-600'
+                  }`}
+                  animate={stepStatus === 'active' ? { scale: [1, 1.05, 1] } : {}}
+                  transition={{ repeat: Infinity, duration: 2 }}
+                >
+                  {stepStatus === 'completed' ? (
+                    <CheckIcon className="w-4 h-4" />
+                  ) : stepStatus === 'failed' ? (
+                    <CloseIcon className="w-4 h-4" />
+                  ) : (
+                    <Icon className="w-4 h-4" />
+                  )}
+                </motion.div>
+                <span className={`text-xs mt-1.5 font-medium transition-colors ${
+                  stepStatus === 'completed' ? 'text-volt-400' :
+                  stepStatus === 'active' ? 'text-pulse-400' :
+                  stepStatus === 'failed' ? 'text-red-400' :
+                  'text-ink-600'
+                }`}>
+                  {step.label}
+                </span>
+              </div>
+              {index < steps.length - 1 && (
+                <div className={`flex-1 h-0.5 mx-2 rounded-full transition-all duration-500 ${
+                  getStepStatus(steps[index + 1].id, index + 1) !== 'pending' 
+                    ? 'bg-volt-500/50' 
+                    : 'bg-ink-800'
+                }`} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// Stat card component
+function StatCard({ icon: Icon, value, label, color, isActive }) {
+  return (
+    <motion.div 
+      className={`relative p-3 rounded-xl overflow-hidden transition-all duration-300 ${
+        isActive 
+          ? `bg-${color}-500/10 border border-${color}-500/30 ring-1 ring-${color}-500/20` 
+          : 'bg-ink-900/50 border border-ink-800/50'
+      }`}
+      animate={isActive ? { scale: [1, 1.02, 1] } : {}}
+      transition={{ repeat: Infinity, duration: 2 }}
+    >
+      {isActive && (
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-shimmer" />
+      )}
+      <div className="relative flex items-center gap-3">
+        <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+          isActive ? `bg-${color}-500/20` : 'bg-ink-800/50'
+        }`}>
+          <Icon className={`w-4 h-4 ${isActive ? `text-${color}-400` : 'text-ink-500'}`} />
+        </div>
+        <div>
+          <motion.div 
+            key={value}
+            initial={{ scale: 0.8, opacity: 0.5 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className={`text-xl font-display font-bold ${isActive ? 'text-white' : 'text-ink-300'}`}
+          >
+            {value}
+          </motion.div>
+          <div className="text-xs text-ink-500">{label}</div>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+function SignalIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 4v16" />
+    </svg>
   )
 }
 

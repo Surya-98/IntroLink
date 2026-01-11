@@ -857,7 +857,7 @@ app.post('/api/agent/start', async (req, res) => {
 });
 
 /**
- * Get workflow status and results
+ * Get workflow status and results with detailed intermediate data
  */
 app.get('/api/agent/status/:workflowId', async (req, res) => {
   try {
@@ -870,11 +870,60 @@ app.get('/api/agent/status/:workflowId', async (req, res) => {
       return res.status(404).json({ error: 'Workflow not found' });
     }
 
+    // Fetch recent items for live activity feed (most recent 5 of each)
+    const [recentJobs, recentContacts, recentEmails] = await Promise.all([
+      Job.find({ workflow_id: workflowId })
+        .sort({ created_at: -1 })
+        .limit(5)
+        .select('title company_name location created_at')
+        .lean(),
+      Contact.find({ workflow_id: workflowId })
+        .sort({ created_at: -1 })
+        .limit(5)
+        .select('name title company created_at')
+        .lean(),
+      Email.find({ workflow_id: workflowId })
+        .sort({ created_at: -1 })
+        .limit(5)
+        .select('recipient_name recipient_company subject created_at')
+        .lean()
+    ]);
+
+    // Get actual counts from database for accuracy
+    const [jobsCount, contactsCount, emailsCount] = await Promise.all([
+      Job.countDocuments({ workflow_id: workflowId }),
+      Contact.countDocuments({ workflow_id: workflowId }),
+      Email.countDocuments({ workflow_id: workflowId })
+    ]);
+
+    // Build activity feed from recent items
+    const activityFeed = [
+      ...recentJobs.map(j => ({
+        type: 'job',
+        title: `Found job: ${j.title}`,
+        subtitle: j.company_name,
+        timestamp: j.created_at
+      })),
+      ...recentContacts.map(c => ({
+        type: 'contact',
+        title: `Found contact: ${c.name}`,
+        subtitle: `${c.title} at ${c.company}`,
+        timestamp: c.created_at
+      })),
+      ...recentEmails.map(e => ({
+        type: 'email',
+        title: `Drafted email for ${e.recipient_name}`,
+        subtitle: e.subject?.substring(0, 50) + (e.subject?.length > 50 ? '...' : ''),
+        timestamp: e.created_at
+      }))
+    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 8);
+
     res.json({
       workflow: {
         id: workflow._id,
         status: workflow.status,
         target_roles: workflow.target_roles,
+        target_companies: workflow.target_companies,
         target_locations: workflow.target_locations,
         preferences: workflow.preferences,
         progress: workflow.progress,
@@ -891,10 +940,17 @@ app.get('/api/agent/status/:workflowId', async (req, res) => {
         skills: workflow.resume_id.skills?.slice(0, 10)
       } : null,
       summary: {
-        jobs_count: workflow.jobs?.length || workflow.progress?.total_jobs_found || 0,
-        contacts_count: workflow.contacts?.length || workflow.progress?.total_contacts_found || 0,
-        emails_count: workflow.emails?.length || workflow.progress?.total_emails_drafted || 0
-      }
+        jobs_count: jobsCount,
+        contacts_count: contactsCount,
+        emails_count: emailsCount
+      },
+      // New detailed intermediate data
+      recent: {
+        jobs: recentJobs,
+        contacts: recentContacts,
+        emails: recentEmails
+      },
+      activity_feed: activityFeed
     });
   } catch (error) {
     console.error('[API] Status error:', error);

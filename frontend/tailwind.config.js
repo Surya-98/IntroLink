@@ -4,6 +4,13 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
+  safelist: [
+    // Safelist dynamic color classes used in components
+    { pattern: /bg-(volt|pulse|signal|ink)-(100|200|300|400|500|600|700|800|900)\/(10|20|30|50)/ },
+    { pattern: /text-(volt|pulse|signal|ink)-(300|400|500|600)/ },
+    { pattern: /border-(volt|pulse|signal|ink)-(500)\/(20|30|50)/ },
+    { pattern: /ring-(volt|pulse|signal|ink)-(500)\/(20|50)/ },
+  ],
   theme: {
     extend: {
       fontFamily: {

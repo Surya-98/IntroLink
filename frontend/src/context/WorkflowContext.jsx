@@ -59,10 +59,10 @@ export function WorkflowProvider({ children }) {
       // Initial fetch
       pollWorkflowStatus(activeWorkflowId)
       
-      // Start polling
+      // Start polling - faster for more responsive updates
       pollIntervalRef.current = setInterval(() => {
         pollWorkflowStatus(activeWorkflowId)
-      }, 2000)
+      }, 1500) // Poll every 1.5 seconds for better UX
     }
 
     return () => {
@@ -88,13 +88,13 @@ export function WorkflowProvider({ children }) {
     setWorkflowStatus({ workflow: { status: 'pending', progress: { current_step: 'Starting...' } } })
     setWorkflowResults(null)
     
-    // Start polling
+    // Start polling - faster for more responsive updates
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current)
     }
     pollIntervalRef.current = setInterval(() => {
       pollWorkflowStatus(data.workflowId)
-    }, 2000)
+    }, 1500)
 
     return data
   }
@@ -130,13 +130,13 @@ export function WorkflowProvider({ children }) {
     // Fetch initial status
     await pollWorkflowStatus(workflowId)
     
-    // Start polling if not complete
+    // Start polling if not complete - faster for responsiveness
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current)
     }
     pollIntervalRef.current = setInterval(() => {
       pollWorkflowStatus(workflowId)
-    }, 2000)
+    }, 1500)
   }
 
   // Check if there's a running workflow
