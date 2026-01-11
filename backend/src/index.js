@@ -3,14 +3,17 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import multer from 'multer';
-import pdfParse from 'pdf-parse';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 import mammoth from 'mammoth';
-import { x402 } from './services/x402Protocol.js';
 import { PeopleFinderTool, MockPeopleFinderTool } from './services/peopleFinder.js';
 import { JobFinderTool, MockJobFinderTool } from './services/jobFinder.js';
 import { HappenstanceEnricher, MockHappenstanceEnricher } from './services/happenstanceEnricher.js';
+import { TombaEnricher, MockTombaEnricher } from './services/tombaEnricher.js';
+import { EmailSenderService, MockEmailSenderService } from './services/emailSender.js';
 import { getOrchestrator } from './services/agentOrchestrator.js';
-import { Offer, Receipt, Contact, Job, Workflow, Email, Resume } from './models/schemas.js';
+import { Receipt, Contact, Job, Workflow, Email, Resume } from './models/schemas.js';
 
 // Configure multer for file uploads (store in memory)
 const upload = multer({
@@ -40,9 +43,15 @@ const PORT = process.env.PORT || 3001;
 const MONGODB_URI = process.env.MONGODB_URI;
 const APIFY_TOKEN = process.env.APIFY_TOKEN;
 const HAPPENSTANCE_API_KEY = process.env.HAPPENSTANCE_API_KEY;
+const TOMBA_API_KEY = process.env.TOMBA_API_KEY;
+const TOMBA_API_SECRET = process.env.TOMBA_API_SECRET;
 
-// Global enricher instance for reuse
+// Global service instances for reuse
+let peopleFinder = null;
+let jobFinder = null;
 let happenstanceEnricher = null;
+let tombaEnricher = null;
+let emailSender = null;
 
 // Validate required environment variables
 if (!MONGODB_URI) {
@@ -53,36 +62,47 @@ if (!MONGODB_URI) {
 
 // Initialize tools
 const initializeTools = () => {
-  // Register real Apify-based People Finder if token available
+  // Initialize People Finder
   if (APIFY_TOKEN) {
-    const realPeopleFinder = new PeopleFinderTool(APIFY_TOKEN);
-    x402.registerProvider('people-finder-exa', realPeopleFinder);
-    console.log('✓ Registered real People Finder (Apify Exa)');
+    peopleFinder = new PeopleFinderTool(APIFY_TOKEN);
+    console.log('✓ Initialized People Finder (Apify Exa)');
     
-    // Register real LinkedIn Job Finder
-    const realJobFinder = new JobFinderTool(APIFY_TOKEN);
-    x402.registerProvider('job-finder-linkedin', realJobFinder);
-    console.log('✓ Registered real LinkedIn Job Finder (Apify)');
+    // Initialize LinkedIn Job Finder
+    jobFinder = new JobFinderTool(APIFY_TOKEN);
+    console.log('✓ Initialized LinkedIn Job Finder (Apify)');
+  } else {
+    peopleFinder = new MockPeopleFinderTool();
+    console.log('✓ Initialized mock People Finder');
+    
+    jobFinder = new MockJobFinderTool();
+    console.log('✓ Initialized mock Job Finder');
   }
-  
-  // Always register mock provider for testing/comparison
-  const mockPeopleFinder = new MockPeopleFinderTool();
-  x402.registerProvider('people-finder-mock', mockPeopleFinder);
-  console.log('✓ Registered mock People Finder');
-  
-  const mockJobFinder = new MockJobFinderTool();
-  x402.registerProvider('job-finder-mock', mockJobFinder);
-  console.log('✓ Registered mock Job Finder');
 
-  // Register Happenstance enricher for person data enrichment
+  // Initialize Happenstance enricher for person data enrichment
   if (HAPPENSTANCE_API_KEY) {
     happenstanceEnricher = new HappenstanceEnricher(HAPPENSTANCE_API_KEY);
-    x402.registerProvider('happenstance-enricher', happenstanceEnricher);
-    console.log('✓ Registered Happenstance Enricher (real API)');
+    console.log('✓ Initialized Happenstance Enricher (real API)');
   } else {
     happenstanceEnricher = new MockHappenstanceEnricher();
-    x402.registerProvider('happenstance-enricher-mock', happenstanceEnricher);
-    console.log('✓ Registered mock Happenstance Enricher');
+    console.log('✓ Initialized mock Happenstance Enricher');
+  }
+
+  // Initialize Tomba enricher for LinkedIn email lookup
+  if (TOMBA_API_KEY && TOMBA_API_SECRET) {
+    tombaEnricher = new TombaEnricher(TOMBA_API_KEY, TOMBA_API_SECRET);
+    console.log('✓ Initialized Tomba Enricher (real API)');
+  } else {
+    tombaEnricher = new MockTombaEnricher();
+    console.log('✓ Initialized mock Tomba Enricher');
+  }
+
+  // Initialize email sender service
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    emailSender = new EmailSenderService();
+    console.log('✓ Email Sender configured (SMTP)');
+  } else {
+    emailSender = new MockEmailSenderService();
+    console.log('✓ Using mock Email Sender (SMTP not configured)');
   }
 };
 
@@ -175,37 +195,13 @@ app.post('/api/resume/upload', upload.single('resume'), async (req, res) => {
 });
 
 /**
- * Get quote for people search (402 Payment Required simulation)
+ * Get quote for people search
  */
 app.post('/api/people-finder/quote', async (req, res) => {
   try {
-    const { query, company, role, numResults = 5, provider = 'people-finder-exa' } = req.body;
-
-    const quote = await x402.requestQuote(provider, {
-      query,
-      company,
-      role,
-      numResults
-    });
-
-    // Return 402 Payment Required with quote info
-    res.status(402).json({
-      message: 'Payment Required',
-      quote
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * Sweep quotes from all people search providers
- */
-app.post('/api/people-finder/sweep', async (req, res) => {
-  try {
     const { query, company, role, numResults = 5 } = req.body;
 
-    const quotes = await x402.sweepQuotes('people_search', {
+    const quote = await peopleFinder.getQuote({
       query,
       company,
       role,
@@ -213,16 +209,11 @@ app.post('/api/people-finder/sweep', async (req, res) => {
     });
 
     res.json({
-      message: 'Quotes collected',
-      total_providers: quotes.length,
-      quotes: quotes.map(q => ({
-        offer_id: q.offer_id,
-        provider: q.provider,
-        price_usd: q.price_usd,
-        latency_estimate_ms: q.latency_estimate_ms,
-        reliability_score: q.reliability_score,
-        x402_headers: q.x402_response.headers
-      }))
+      message: 'Quote retrieved',
+      quote: {
+        provider: peopleFinder.providerName,
+        ...quote
+      }
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -230,25 +221,7 @@ app.post('/api/people-finder/sweep', async (req, res) => {
 });
 
 /**
- * Pay for an offer and execute
- */
-app.post('/api/pay/:offerId', async (req, res) => {
-  try {
-    const { offerId } = req.params;
-    
-    const result = await x402.payAndExecute(offerId);
-
-    res.json({
-      message: 'Payment successful',
-      ...result
-    });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-/**
- * Full flow: sweep quotes, pay best, execute
+ * Full flow: execute people search
  * Optionally enrich contacts with Happenstance for email/personal info
  */
 app.post('/api/people-finder/search', async (req, res) => {
@@ -258,7 +231,6 @@ app.post('/api/people-finder/search', async (req, res) => {
       company, 
       role, 
       numResults = 5,
-      strategy = 'cheapest', // cheapest, fastest, reliable, balanced
       enrichContacts = false // Set to true to enrich with Happenstance
     } = req.body;
 
@@ -269,16 +241,26 @@ app.post('/api/people-finder/search', async (req, res) => {
       return res.status(400).json({ error: 'Please provide either a company name or a search query' });
     }
 
-    const result = await x402.executeWithQuoteSweep(
-      'people_search',
-      { query, company, role, numResults },
-      strategy
-    );
+    const startTime = Date.now();
+    const result = await peopleFinder.execute({ query, company, role, numResults });
+    const executionTime = Date.now() - startTime;
 
-    console.log(`[API] Search completed successfully. Found ${result.result?.contacts?.length || 0} contacts`);
+    console.log(`[API] Search completed successfully. Found ${result?.contacts?.length || 0} contacts`);
 
-    let contacts = result.result?.contacts || [];
+    let contacts = result?.contacts || [];
     let enrichmentStats = null;
+    const quote = await peopleFinder.getQuote({ query, company, role, numResults });
+
+    // Create receipt record
+    const receipt = await Receipt.create({
+      tool_id: 'people-finder',
+      tool_name: peopleFinder.name,
+      provider: peopleFinder.providerName,
+      amount_paid_usd: quote.price_usd,
+      transaction_id: `tx_${Date.now()}`,
+      response_data: result,
+      execution_time_ms: executionTime
+    });
 
     // Enrich contacts with Happenstance if requested
     if (enrichContacts && contacts.length > 0 && happenstanceEnricher) {
@@ -298,17 +280,17 @@ app.post('/api/people-finder/search', async (req, res) => {
     }
 
     // Save contacts to database
-    if (result.success && contacts.length > 0) {
-      const costPerContact = result.receipt.amount_paid_usd / contacts.length;
+    if (contacts.length > 0) {
+      const costPerContact = quote.price_usd / contacts.length;
       
       for (const contact of contacts) {
         try {
           await Contact.create({
             ...contact,
-            source: result.receipt.provider,
-            search_query: result.result.query,
+            source: peopleFinder.providerName,
+            search_query: result.query,
             cost_usd: costPerContact,
-            receipt_id: result.receipt.id
+            receipt_id: receipt._id
           });
         } catch (dbError) {
           console.error('[API] Failed to save contact:', dbError.message);
@@ -320,13 +302,18 @@ app.post('/api/people-finder/search', async (req, res) => {
       message: 'Search completed',
       contacts,
       enrichment: enrichmentStats,
-      receipt: result.receipt,
-      quote_sweep: result.quote_sweep,
+      receipt: {
+        id: receipt._id,
+        transaction_id: receipt.transaction_id,
+        amount_paid_usd: quote.price_usd,
+        execution_time_ms: executionTime,
+        provider: peopleFinder.providerName
+      },
       provenance: contacts.map(c => ({
         contact: c.name,
-        data_source: result.receipt.provider,
-        cost_usd: result.receipt.amount_paid_usd / (contacts.length || 1),
-        query_used: result.result.query,
+        data_source: peopleFinder.providerName,
+        cost_usd: quote.price_usd / (contacts.length || 1),
+        query_used: result.query,
         enrichment_source: c.enrichment_source || null,
         email_found: !!c.email
       }))
@@ -343,7 +330,7 @@ app.post('/api/people-finder/search', async (req, res) => {
 // ============================================
 
 /**
- * Get quote for job search (402 Payment Required simulation)
+ * Get quote for job search
  */
 app.post('/api/job-finder/quote', async (req, res) => {
   try {
@@ -356,11 +343,10 @@ app.post('/api/job-finder/quote', async (req, res) => {
       employmentType,
       easyApplyOnly,
       datePosted,
-      limit = 25,
-      provider = 'job-finder-linkedin'
+      limit = 25
     } = req.body;
 
-    const quote = await x402.requestQuote(provider, {
+    const quote = await jobFinder.getQuote({
       keywords,
       location,
       company,
@@ -372,49 +358,12 @@ app.post('/api/job-finder/quote', async (req, res) => {
       limit
     });
 
-    res.status(402).json({
-      message: 'Payment Required',
-      quote
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * Sweep quotes from all job search providers
- */
-app.post('/api/job-finder/sweep', async (req, res) => {
-  try {
-    const { 
-      keywords, 
-      location, 
-      company,
-      workArrangement,
-      seniorityLevel,
-      limit = 25
-    } = req.body;
-
-    const quotes = await x402.sweepQuotes('job_search', {
-      keywords,
-      location,
-      company,
-      workArrangement,
-      seniorityLevel,
-      limit
-    });
-
     res.json({
-      message: 'Quotes collected',
-      total_providers: quotes.length,
-      quotes: quotes.map(q => ({
-        offer_id: q.offer_id,
-        provider: q.provider,
-        price_usd: q.price_usd,
-        latency_estimate_ms: q.latency_estimate_ms,
-        reliability_score: q.reliability_score,
-        x402_headers: q.x402_response.headers
-      }))
+      message: 'Quote retrieved',
+      quote: {
+        provider: jobFinder.providerName,
+        ...quote
+      }
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -422,7 +371,7 @@ app.post('/api/job-finder/sweep', async (req, res) => {
 });
 
 /**
- * Full job search flow: sweep quotes, pay best, execute
+ * Full job search flow
  */
 app.post('/api/job-finder/search', async (req, res) => {
   try {
@@ -435,49 +384,64 @@ app.post('/api/job-finder/search', async (req, res) => {
       employmentType,
       easyApplyOnly,
       datePosted,
-      limit = 25,
-      strategy = 'cheapest' // cheapest, fastest, reliable, balanced
+      limit = 25
     } = req.body;
 
     console.log(`[API] Job search request: keywords="${keywords}", location="${location}"`);
 
-    const result = await x402.executeWithQuoteSweep(
-      'job_search',
-      { 
-        keywords, 
-        location, 
-        company, 
-        workArrangement,
-        seniorityLevel,
-        employmentType,
-        easyApplyOnly,
-        datePosted,
-        limit 
-      },
-      strategy
-    );
+    const startTime = Date.now();
+    const result = await jobFinder.execute({ 
+      keywords, 
+      location, 
+      company, 
+      workArrangement,
+      seniorityLevel,
+      employmentType,
+      easyApplyOnly,
+      datePosted,
+      limit 
+    });
+    const executionTime = Date.now() - startTime;
+
+    const quote = await jobFinder.getQuote({ keywords, location, limit });
+
+    // Create receipt record
+    const receipt = await Receipt.create({
+      tool_id: 'job-finder',
+      tool_name: jobFinder.name,
+      provider: jobFinder.providerName,
+      amount_paid_usd: quote.price_usd,
+      transaction_id: `tx_${Date.now()}`,
+      response_data: result,
+      execution_time_ms: executionTime
+    });
 
     // Save jobs to database
-    if (result.success && result.result.jobs) {
-      const costPerJob = result.receipt.amount_paid_usd / result.result.jobs.length;
+    if (result.jobs) {
+      const costPerJob = quote.price_usd / result.jobs.length;
       
-      for (const job of result.result.jobs) {
+      for (const job of result.jobs) {
         await Job.create({
           ...job,
-          source: result.receipt.provider,
+          source: jobFinder.providerName,
           cost_usd: costPerJob,
-          receipt_id: result.receipt.id
+          receipt_id: receipt._id
         });
       }
     }
 
     res.json({
       message: 'Job search completed',
-      jobs: result.result.jobs,
-      total_found: result.result.jobs?.length || 0,
-      receipt: result.receipt,
-      quote_sweep: result.quote_sweep,
-      search_params: result.result.searchParams
+      jobs: result.jobs,
+      total_found: result.jobs?.length || 0,
+      receipt: {
+        id: receipt._id,
+        transaction_id: receipt.transaction_id,
+        amount_paid_usd: quote.price_usd,
+        execution_time_ms: executionTime,
+        provider: jobFinder.providerName
+      },
+      search_params: result.searchParams
     });
   } catch (error) {
     console.error('[API] Job search error:', error);
@@ -796,6 +760,299 @@ app.post('/api/enrich/lookup', async (req, res) => {
     console.error('[API] Person lookup error:', error.message);
     res.status(500).json({ error: error.message });
   }
+});
+
+// ============================================
+// Tomba Email Lookup Routes
+// ============================================
+
+/**
+ * Find email from LinkedIn profile URL using Tomba
+ */
+app.post('/api/tomba/linkedin', async (req, res) => {
+  try {
+    const { url, linkedinUrl } = req.body;
+    const linkedIn = url || linkedinUrl;
+
+    if (!linkedIn) {
+      return res.status(400).json({ error: 'LinkedIn URL is required' });
+    }
+
+    console.log(`[API] Tomba LinkedIn lookup: ${linkedIn}`);
+
+    const result = await tombaEnricher.findEmailByLinkedIn(linkedIn);
+
+    if (result.success) {
+      // Optionally update contact in database if exists
+      await Contact.updateMany(
+        { linkedin_url: { $regex: linkedIn.split('/in/')[1]?.replace(/\/$/, ''), $options: 'i' } },
+        { 
+          email: result.email,
+          email_source: 'tomba',
+          email_confidence: result.confidence
+        }
+      );
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('[API] Tomba LinkedIn lookup error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Find email by name and company domain
+ */
+app.post('/api/tomba/find', async (req, res) => {
+  try {
+    const { firstName, lastName, domain, first_name, last_name } = req.body;
+    const fName = firstName || first_name;
+    const lName = lastName || last_name;
+
+    if (!fName || !lName || !domain) {
+      return res.status(400).json({ error: 'firstName, lastName, and domain are required' });
+    }
+
+    console.log(`[API] Tomba email find: ${fName} ${lName} at ${domain}`);
+
+    const result = await tombaEnricher.findEmailByNameDomain(fName, lName, domain);
+
+    res.json(result);
+  } catch (error) {
+    console.error('[API] Tomba email find error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Verify an email address
+ */
+app.post('/api/tomba/verify', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    console.log(`[API] Tomba email verify: ${email}`);
+
+    const result = await tombaEnricher.verifyEmail(email);
+
+    res.json(result);
+  } catch (error) {
+    console.error('[API] Tomba email verify error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Enrich a contact with email using Tomba
+ */
+app.post('/api/tomba/enrich-contact', async (req, res) => {
+  try {
+    const { contactId, linkedinUrl } = req.body;
+
+    if (!contactId && !linkedinUrl) {
+      return res.status(400).json({ error: 'Either contactId or linkedinUrl is required' });
+    }
+
+    let linkedIn = linkedinUrl;
+    let contact = null;
+
+    // If contactId provided, get LinkedIn URL from contact
+    if (contactId) {
+      contact = await Contact.findById(contactId);
+      if (!contact) {
+        return res.status(404).json({ error: 'Contact not found' });
+      }
+      linkedIn = contact.linkedin_url;
+    }
+
+    if (!linkedIn) {
+      return res.status(400).json({ error: 'Contact has no LinkedIn URL' });
+    }
+
+    console.log(`[API] Tomba enrich contact: ${linkedIn}`);
+
+    const result = await tombaEnricher.findEmailByLinkedIn(linkedIn);
+
+    if (result.success && contact) {
+      // Update contact in database
+      await Contact.findByIdAndUpdate(contactId, {
+        email: result.email,
+        email_source: 'tomba',
+        email_confidence: result.confidence
+      });
+    }
+
+    res.json({
+      success: result.success,
+      email: result.email,
+      email_type: result.email_type,
+      confidence: result.confidence,
+      contact_updated: !!contact
+    });
+  } catch (error) {
+    console.error('[API] Tomba enrich contact error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// Email Sending Routes
+// ============================================
+
+/**
+ * Send an email
+ */
+app.post('/api/email/send', async (req, res) => {
+  try {
+    const { to, subject, body, html, replyTo } = req.body;
+
+    if (!to || !subject || !body) {
+      return res.status(400).json({ error: 'to, subject, and body are required' });
+    }
+
+    console.log(`[API] Sending email to: ${to}`);
+
+    const result = await emailSender.sendEmail({ to, subject, body, html, replyTo });
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Email sent successfully',
+        messageId: result.messageId
+      });
+    } else {
+      res.status(400).json(result);
+    }
+  } catch (error) {
+    console.error('[API] Email send error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Send a drafted email from the database
+ */
+app.post('/api/email/send-draft/:emailId', async (req, res) => {
+  try {
+    const { emailId } = req.params;
+    const { replyTo } = req.body;
+
+    console.log(`[API] Sending drafted email: ${emailId}`);
+
+    // Get the email draft
+    const emailDraft = await Email.findById(emailId).populate('contact_id');
+    
+    if (!emailDraft) {
+      return res.status(404).json({ error: 'Email draft not found' });
+    }
+
+    // Get recipient email - either from draft or from associated contact
+    let recipientEmail = emailDraft.recipient_email;
+    
+    if (!recipientEmail && emailDraft.contact_id?.email) {
+      recipientEmail = emailDraft.contact_id.email;
+    }
+
+    if (!recipientEmail) {
+      return res.status(400).json({ 
+        error: 'No recipient email address available. Please enrich the contact first.',
+        contact_id: emailDraft.contact_id?._id
+      });
+    }
+
+    // Send the email
+    const result = await emailSender.sendEmail({
+      to: recipientEmail,
+      subject: emailDraft.subject,
+      body: emailDraft.body,
+      replyTo
+    });
+
+    if (result.success) {
+      // Update email status
+      await Email.findByIdAndUpdate(emailId, {
+        status: 'sent',
+        sent_at: new Date(),
+        recipient_email: recipientEmail,
+        send_result: {
+          message_id: result.messageId,
+          response: result.response
+        }
+      });
+
+      res.json({
+        success: true,
+        message: 'Email sent successfully',
+        messageId: result.messageId,
+        sentTo: recipientEmail
+      });
+    } else {
+      res.status(400).json(result);
+    }
+  } catch (error) {
+    console.error('[API] Send draft error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Send multiple emails in batch
+ */
+app.post('/api/email/send-batch', async (req, res) => {
+  try {
+    const { emails, delay = 1000 } = req.body;
+
+    if (!emails || !Array.isArray(emails) || emails.length === 0) {
+      return res.status(400).json({ error: 'emails array is required' });
+    }
+
+    console.log(`[API] Sending batch of ${emails.length} emails`);
+
+    const results = await emailSender.sendBatch(emails, { delay });
+
+    res.json({
+      success: results.failed === 0,
+      message: `Sent ${results.sent}/${results.total} emails`,
+      ...results
+    });
+  } catch (error) {
+    console.error('[API] Batch send error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Verify SMTP configuration
+ */
+app.post('/api/email/verify', async (req, res) => {
+  try {
+    const { testEmail } = req.body;
+
+    console.log('[API] Verifying email configuration');
+
+    const result = await emailSender.verifyConfiguration(testEmail);
+
+    res.json(result);
+  } catch (error) {
+    console.error('[API] Email verify error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get email service status
+ */
+app.get('/api/email/status', (req, res) => {
+  res.json({
+    configured: emailSender.isAvailable(),
+    provider: emailSender.isAvailable() ? 'smtp' : 'mock',
+    fromEmail: emailSender.fromEmail || null
+  });
 });
 
 // ============================================
@@ -1169,13 +1426,24 @@ const startServer = async () => {
       console.log(`   POST /api/enrich/batch          - Enrich multiple contacts`);
       console.log(`   POST /api/enrich/linkedin       - Lookup by LinkedIn URL`);
       console.log(`   POST /api/enrich/lookup         - Lookup by name and company`);
+      console.log(`\n   Tomba Email Lookup:`);
+      console.log(`   POST /api/tomba/linkedin        - Find email from LinkedIn URL`);
+      console.log(`   POST /api/tomba/find            - Find email by name + domain`);
+      console.log(`   POST /api/tomba/verify          - Verify email address`);
+      console.log(`   POST /api/tomba/enrich-contact  - Enrich contact with email`);
+      console.log(`\n   Email Sending:`);
+      console.log(`   POST /api/email/send            - Send an email`);
+      console.log(`   POST /api/email/send-draft/:id  - Send a drafted email`);
+      console.log(`   POST /api/email/send-batch      - Send multiple emails`);
+      console.log(`   POST /api/email/verify          - Verify SMTP configuration`);
+      console.log(`   GET  /api/email/status          - Get email service status`);
       console.log(`\n   General:`);
       console.log(`   POST /api/pay/:offerId          - Pay and execute`);
       console.log(`   GET  /api/offers                - List all offers`);
       console.log(`   GET  /api/receipts              - List all receipts`);
       console.log(`   GET  /api/contacts              - List all contacts`);
       console.log(`   GET  /api/resumes               - List all resumes`);
-      console.log(`\n💡 Set APIFY_TOKEN, FIREWORKS_API_KEY, and HAPPENSTANCE_API_KEY env vars for full functionality`);
+      console.log(`\n💡 Set APIFY_TOKEN, FIREWORKS_API_KEY, HAPPENSTANCE_API_KEY, TOMBA_API_KEY/SECRET, and SMTP_* env vars for full functionality`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

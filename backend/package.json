@@ -1,7 +1,7 @@
 {
   "name": "introlink-backend",
   "version": "1.0.0",
-  "description": "x402 payment-aware job outreach agent",
+  "description": "AI-powered job search and outreach agent",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
@@ -16,7 +16,8 @@
     "mammoth": "^1.11.0",
     "mongoose": "^8.0.0",
     "multer": "^2.0.2",
-    "pdf-parse": "^2.4.5",
+    "nodemailer": "^6.9.0",
+    "pdf-parse": "^1.1.1",
     "uuid": "^9.0.0"
   }
 }

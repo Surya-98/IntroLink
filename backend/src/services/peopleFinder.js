@@ -25,7 +25,7 @@ export class PeopleFinderTool {
   }
 
   /**
-   * Get a quote for the search (x402 - 402 Payment Required)
+   * Get a quote for the search
    */
   async getQuote(params) {
     // Calculate price based on query complexity

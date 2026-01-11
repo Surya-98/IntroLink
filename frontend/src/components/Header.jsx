@@ -128,7 +128,7 @@ export default function Header({ activeTab, setActiveTab }) {
             })}
           </nav>
 
-          {/* Right section: Theme toggle + Status */}
+          {/* Right section: Theme toggle */}
           <div className="flex items-center gap-3">
             {/* Theme Toggle */}
             <motion.button
@@ -150,16 +150,6 @@ export default function Header({ activeTab, setActiveTab }) {
                 {isDark ? <SunIcon className="w-5 h-5" /> : <MoonIcon className="w-5 h-5" />}
               </motion.div>
             </motion.button>
-
-            {/* Status indicator */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
-              isDark 
-                ? 'bg-volt-500/10 border border-volt-500/20' 
-                : 'bg-green-50 border border-green-200'
-            }`}>
-              <div className="w-2 h-2 rounded-full bg-volt-500 animate-pulse" />
-              <span className={`text-xs font-medium ${isDark ? 'text-volt-400' : 'text-green-700'}`}>x402 Active</span>
-            </div>
           </div>
         </div>
       </div>

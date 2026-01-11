@@ -22,7 +22,7 @@ export class HappenstanceEnricher {
   }
 
   /**
-   * Get a quote for enrichment (x402 - 402 Payment Required)
+   * Get a quote for enrichment
    */
   async getQuote(params) {
     const numContacts = params.contacts?.length || 1;

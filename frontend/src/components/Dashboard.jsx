@@ -786,6 +786,15 @@ function LinkedInIcon({ className }) {
   )
 }
 
+function SendIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M22 2L11 13" />
+      <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+    </svg>
+  )
+}
+
 function WorkflowDetailView({ 
   workflow, 
   details, 
@@ -805,6 +814,9 @@ function WorkflowDetailView({
 }) {
   const [copiedSubject, setCopiedSubject] = useState(false)
   const [copiedBody, setCopiedBody] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
+  const [emailError, setEmailError] = useState(null)
 
   const copyToClipboard = async (text, type) => {
     await navigator.clipboard.writeText(text)
@@ -814,6 +826,42 @@ function WorkflowDetailView({
     } else {
       setCopiedBody(true)
       setTimeout(() => setCopiedBody(false), 2000)
+    }
+  }
+
+  const handleSendEmail = async (contact, email) => {
+    if (!contact?.email || !email?.subject || !email?.body) {
+      setEmailError('Missing email address or email content')
+      return
+    }
+
+    setSendingEmail(true)
+    setEmailError(null)
+    setEmailSent(false)
+
+    try {
+      const response = await fetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: contact.email,
+          subject: email.subject,
+          body: email.body
+        })
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        setEmailSent(true)
+        setTimeout(() => setEmailSent(false), 5000)
+      } else {
+        setEmailError(result.error || 'Failed to send email')
+      }
+    } catch (error) {
+      setEmailError(error.message || 'Failed to send email')
+    } finally {
+      setSendingEmail(false)
     }
   }
 
@@ -1096,86 +1144,271 @@ function WorkflowDetailView({
             </div>
           </div>
 
-          {/* Drafted Email */}
+          {/* Drafted Messages */}
           {contactEmail ? (
-            <div className="space-y-4">
-              <h3 className="font-display text-lg font-semibold text-white flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-signal-500/10 flex items-center justify-center">
-                  <MailIcon className="w-4 h-4 text-signal-400" />
-                </div>
-                Drafted Email
-              </h3>
-              
-              <div className="rounded-2xl bg-gradient-to-br from-ink-900 to-ink-950 border border-ink-800 overflow-hidden">
-                {/* Subject */}
-                <div className="p-5 border-b border-ink-800/50">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-ink-500 uppercase tracking-wider font-medium">Subject</span>
-                    <motion.button 
-                      onClick={() => copyToClipboard(contactEmail.subject, 'subject')}
-                      className="p-2 rounded-lg hover:bg-ink-800 transition-colors"
-                      whileTap={{ scale: 0.95 }}
-                    >
-                      {copiedSubject ? (
-                        <CheckIcon className="w-4 h-4 text-volt-400" />
-                      ) : (
-                        <CopyIcon className="w-4 h-4 text-ink-400" />
-                      )}
-                    </motion.button>
+            <div className="space-y-6">
+              {/* Message Type Tabs Header */}
+              <div className="flex items-center justify-between">
+                <h3 className={`font-display text-lg font-semibold flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  <div className="w-8 h-8 rounded-lg bg-signal-500/10 flex items-center justify-center">
+                    <MailIcon className="w-4 h-4 text-signal-400" />
                   </div>
-                  <div className="text-white font-medium text-lg">{contactEmail.subject}</div>
+                  Drafted Messages
+                </h3>
+                <div className={`text-xs px-2 py-1 rounded-lg ${isDark ? 'bg-volt-500/10 text-volt-400' : 'bg-green-50 text-green-700'}`}>
+                  {[
+                    contactEmail.subject && 'Email',
+                    contactEmail.linkedin_inmail?.body && 'InMail',
+                    contactEmail.linkedin_connection_request?.message && 'Connection'
+                  ].filter(Boolean).length} message types ready
                 </div>
+              </div>
 
-                {/* Body */}
-                <div className="p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs text-ink-500 uppercase tracking-wider font-medium">Message</span>
-                    <motion.button 
-                      onClick={() => copyToClipboard(contactEmail.body, 'body')}
-                      className="p-2 rounded-lg hover:bg-ink-800 transition-colors"
-                      whileTap={{ scale: 0.95 }}
-                    >
-                      {copiedBody ? (
-                        <CheckIcon className="w-4 h-4 text-volt-400" />
-                      ) : (
-                        <CopyIcon className="w-4 h-4 text-ink-400" />
-                      )}
-                    </motion.button>
+              {/* Email Section */}
+              {contactEmail.subject && (
+                <div className={`rounded-2xl overflow-hidden ${isDark ? 'bg-gradient-to-br from-ink-900 to-ink-950 border border-ink-800' : 'bg-white border border-slate-200 shadow-sm'}`}>
+                  <div className={`px-5 py-3 flex items-center gap-2 ${isDark ? 'bg-ink-800/50 border-b border-ink-800/50' : 'bg-slate-50 border-b border-slate-200'}`}>
+                    <MailIcon className="w-4 h-4 text-signal-400" />
+                    <span className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Email</span>
                   </div>
-                  <div className="text-ink-300 whitespace-pre-wrap leading-relaxed bg-ink-950/50 rounded-xl p-4 border border-ink-800/30 text-sm">
-                    {contactEmail.body}
+                  
+                  {/* Subject */}
+                  <div className={`p-5 ${isDark ? 'border-b border-ink-800/50' : 'border-b border-slate-100'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-xs uppercase tracking-wider font-medium ${isDark ? 'text-ink-500' : 'text-slate-500'}`}>Subject</span>
+                      <motion.button 
+                        onClick={() => copyToClipboard(contactEmail.subject, 'subject')}
+                        className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-ink-800' : 'hover:bg-slate-100'}`}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        {copiedSubject ? <CheckIcon className="w-4 h-4 text-volt-400" /> : <CopyIcon className={`w-4 h-4 ${isDark ? 'text-ink-400' : 'text-slate-400'}`} />}
+                      </motion.button>
+                    </div>
+                    <div className={`font-medium text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>{contactEmail.subject}</div>
+                  </div>
+
+                  {/* Body */}
+                  <div className="p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className={`text-xs uppercase tracking-wider font-medium ${isDark ? 'text-ink-500' : 'text-slate-500'}`}>Message</span>
+                      <motion.button 
+                        onClick={() => copyToClipboard(contactEmail.body, 'body')}
+                        className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-ink-800' : 'hover:bg-slate-100'}`}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        {copiedBody ? <CheckIcon className="w-4 h-4 text-volt-400" /> : <CopyIcon className={`w-4 h-4 ${isDark ? 'text-ink-400' : 'text-slate-400'}`} />}
+                      </motion.button>
+                    </div>
+                    <div className={`whitespace-pre-wrap leading-relaxed rounded-xl p-4 text-sm ${isDark ? 'text-ink-300 bg-ink-950/50 border border-ink-800/30' : 'text-slate-600 bg-slate-50 border border-slate-200'}`}>
+                      {contactEmail.body}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="p-5 pt-0 space-y-3">
+                    {/* Send Email Button - Only show if contact has email */}
+                    {selectedContact?.email && (
+                      <div className="space-y-2">
+                        <motion.button
+                          onClick={() => handleSendEmail(selectedContact, contactEmail)}
+                          disabled={sendingEmail || emailSent}
+                          className={`w-full justify-center py-3 rounded-xl font-semibold flex items-center gap-2 transition-all ${
+                            emailSent 
+                              ? 'bg-green-500 text-white cursor-default'
+                              : sendingEmail
+                                ? 'bg-volt-500/50 text-ink-950 cursor-wait'
+                                : 'bg-gradient-to-r from-volt-400 to-volt-500 text-ink-950 hover:from-volt-300 hover:to-volt-400'
+                          }`}
+                          whileHover={!sendingEmail && !emailSent ? { scale: 1.02 } : {}}
+                          whileTap={!sendingEmail && !emailSent ? { scale: 0.98 } : {}}
+                        >
+                          {sendingEmail ? (
+                            <>
+                              <div className="w-5 h-5 border-2 border-ink-950/30 border-t-ink-950 rounded-full animate-spin" />
+                              Sending...
+                            </>
+                          ) : emailSent ? (
+                            <>
+                              <CheckIcon className="w-5 h-5" />
+                              Email Sent!
+                            </>
+                          ) : (
+                            <>
+                              <SendIcon className="w-5 h-5" />
+                              Send Email to {selectedContact.email}
+                            </>
+                          )}
+                        </motion.button>
+                        
+                        {emailError && (
+                          <div className="text-sm text-red-400 bg-red-500/10 px-4 py-2 rounded-lg">
+                            {emailError}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex gap-3">
+                      {selectedContact?.email && (
+                        <motion.a
+                          href={`mailto:${selectedContact.email}?subject=${encodeURIComponent(contactEmail.subject)}&body=${encodeURIComponent(contactEmail.body)}`}
+                          className="flex-1 btn-secondary justify-center py-3"
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                        >
+                          <MailIcon className="w-5 h-5" />
+                          Open in Email Client
+                        </motion.a>
+                      )}
+                      <motion.button
+                        onClick={() => copyToClipboard(`Subject: ${contactEmail.subject}\n\n${contactEmail.body}`, 'body')}
+                        className="btn-secondary px-5"
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <CopyIcon className="w-5 h-5" />
+                        Copy
+                      </motion.button>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                {/* Actions */}
-                <div className="p-5 pt-0 flex gap-3">
-                  {selectedContact?.email && (
-                    <motion.a
-                      href={`mailto:${selectedContact.email}?subject=${encodeURIComponent(contactEmail.subject)}&body=${encodeURIComponent(contactEmail.body)}`}
-                      className="flex-1 btn-primary justify-center py-3"
+              {/* LinkedIn InMail Section */}
+              {contactEmail.linkedin_inmail?.body && (
+                <div className={`rounded-2xl overflow-hidden ${isDark ? 'bg-gradient-to-br from-ink-900 to-ink-950 border border-ink-800' : 'bg-white border border-slate-200 shadow-sm'}`}>
+                  <div className={`px-5 py-3 flex items-center justify-between ${isDark ? 'bg-blue-500/10 border-b border-ink-800/50' : 'bg-blue-50 border-b border-blue-100'}`}>
+                    <div className="flex items-center gap-2">
+                      <LinkedInIcon className="w-4 h-4 text-blue-400" />
+                      <span className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>LinkedIn InMail</span>
+                    </div>
+                    <span className={`text-xs ${isDark ? 'text-ink-500' : 'text-slate-500'}`}>
+                      {contactEmail.linkedin_inmail.character_count || contactEmail.linkedin_inmail.body.length} / 1900 chars
+                    </span>
+                  </div>
+                  
+                  {/* Subject */}
+                  {contactEmail.linkedin_inmail.subject && (
+                    <div className={`p-5 ${isDark ? 'border-b border-ink-800/50' : 'border-b border-slate-100'}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`text-xs uppercase tracking-wider font-medium ${isDark ? 'text-ink-500' : 'text-slate-500'}`}>Subject</span>
+                        <motion.button 
+                          onClick={() => copyToClipboard(contactEmail.linkedin_inmail.subject, 'subject')}
+                          className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-ink-800' : 'hover:bg-slate-100'}`}
+                          whileTap={{ scale: 0.95 }}
+                        >
+                          <CopyIcon className={`w-4 h-4 ${isDark ? 'text-ink-400' : 'text-slate-400'}`} />
+                        </motion.button>
+                      </div>
+                      <div className={`font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>{contactEmail.linkedin_inmail.subject}</div>
+                    </div>
+                  )}
+
+                  {/* Body */}
+                  <div className="p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className={`text-xs uppercase tracking-wider font-medium ${isDark ? 'text-ink-500' : 'text-slate-500'}`}>Message</span>
+                      <motion.button 
+                        onClick={() => copyToClipboard(contactEmail.linkedin_inmail.body, 'body')}
+                        className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-ink-800' : 'hover:bg-slate-100'}`}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        <CopyIcon className={`w-4 h-4 ${isDark ? 'text-ink-400' : 'text-slate-400'}`} />
+                      </motion.button>
+                    </div>
+                    <div className={`whitespace-pre-wrap leading-relaxed rounded-xl p-4 text-sm ${isDark ? 'text-ink-300 bg-ink-950/50 border border-ink-800/30' : 'text-slate-600 bg-slate-50 border border-slate-200'}`}>
+                      {contactEmail.linkedin_inmail.body}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="p-5 pt-0 flex gap-3">
+                    {selectedContact?.linkedin_url && (
+                      <motion.a
+                        href={selectedContact.linkedin_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 btn-primary justify-center py-3 bg-blue-500 hover:bg-blue-400"
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <LinkedInIcon className="w-5 h-5" />
+                        Open LinkedIn Profile
+                      </motion.a>
+                    )}
+                    <motion.button
+                      onClick={() => copyToClipboard(contactEmail.linkedin_inmail.body, 'body')}
+                      className="btn-secondary px-5"
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                     >
-                      <MailIcon className="w-5 h-5" />
-                      Open in Email Client
-                    </motion.a>
-                  )}
-                  <motion.button
-                    onClick={() => {
-                      copyToClipboard(`Subject: ${contactEmail.subject}\n\n${contactEmail.body}`, 'body')
-                    }}
-                    className="btn-secondary px-5"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <CopyIcon className="w-5 h-5" />
-                    Copy All
-                  </motion.button>
+                      <CopyIcon className="w-5 h-5" />
+                      Copy
+                    </motion.button>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* LinkedIn Connection Request Section */}
+              {contactEmail.linkedin_connection_request?.message && (
+                <div className={`rounded-2xl overflow-hidden ${isDark ? 'bg-gradient-to-br from-ink-900 to-ink-950 border border-ink-800' : 'bg-white border border-slate-200 shadow-sm'}`}>
+                  <div className={`px-5 py-3 flex items-center justify-between ${isDark ? 'bg-purple-500/10 border-b border-ink-800/50' : 'bg-purple-50 border-b border-purple-100'}`}>
+                    <div className="flex items-center gap-2">
+                      <PeopleIcon className="w-4 h-4 text-purple-400" />
+                      <span className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Connection Request</span>
+                    </div>
+                    <span className={`text-xs ${contactEmail.linkedin_connection_request.message.length > 280 ? 'text-red-400' : isDark ? 'text-ink-500' : 'text-slate-500'}`}>
+                      {contactEmail.linkedin_connection_request.character_count || contactEmail.linkedin_connection_request.message.length} / 300 chars
+                    </span>
+                  </div>
+                  
+                  {/* Message */}
+                  <div className="p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className={`text-xs uppercase tracking-wider font-medium ${isDark ? 'text-ink-500' : 'text-slate-500'}`}>Message</span>
+                      <motion.button 
+                        onClick={() => copyToClipboard(contactEmail.linkedin_connection_request.message, 'body')}
+                        className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-ink-800' : 'hover:bg-slate-100'}`}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        <CopyIcon className={`w-4 h-4 ${isDark ? 'text-ink-400' : 'text-slate-400'}`} />
+                      </motion.button>
+                    </div>
+                    <div className={`whitespace-pre-wrap leading-relaxed rounded-xl p-4 text-sm ${isDark ? 'text-ink-300 bg-ink-950/50 border border-ink-800/30' : 'text-slate-600 bg-slate-50 border border-slate-200'}`}>
+                      {contactEmail.linkedin_connection_request.message}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="p-5 pt-0 flex gap-3">
+                    {selectedContact?.linkedin_url && (
+                      <motion.a
+                        href={selectedContact.linkedin_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 btn-primary justify-center py-3 bg-purple-500 hover:bg-purple-400"
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <PeopleIcon className="w-5 h-5" />
+                        Connect on LinkedIn
+                      </motion.a>
+                    )}
+                    <motion.button
+                      onClick={() => copyToClipboard(contactEmail.linkedin_connection_request.message, 'body')}
+                      className="btn-secondary px-5"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <CopyIcon className="w-5 h-5" />
+                      Copy
+                    </motion.button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
-            <EmptyState message="No email has been drafted for this contact yet." icon={MailIcon} isDark={isDark} />
+            <EmptyState message="No messages have been drafted for this contact yet." icon={MailIcon} isDark={isDark} />
           )}
         </div>
       )}

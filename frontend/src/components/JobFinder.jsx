@@ -83,7 +83,7 @@ export default function JobFinder({ onJobsFound }) {
           Find Your Next <span className="gradient-text">Opportunity</span>
         </h1>
         <p className="text-ink-400 text-lg max-w-2xl mx-auto">
-          Search LinkedIn jobs with AI-powered filtering. Pay only for the data you need via x402 protocol.
+          Search LinkedIn jobs with AI-powered filtering. Find the perfect role with smart search capabilities.
         </p>
       </div>
 

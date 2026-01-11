@@ -23,7 +23,7 @@ export class JobFinderTool {
   }
 
   /**
-   * Get a quote for the job search (x402 - 402 Payment Required)
+   * Get a quote for the job search
    */
   async getQuote(params) {
     let price = this.basePriceUsd;

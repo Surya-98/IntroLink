@@ -18,16 +18,14 @@ const offerSchema = new mongoose.Schema({
   created_at: { type: Date, default: Date.now }
 });
 
-// Receipts collection - paid headers + settlement details
+// Receipts collection - transaction records
 const receiptSchema = new mongoose.Schema({
-  offer_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Offer', required: true },
+  offer_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Offer' },
   tool_id: { type: String, required: true },
   tool_name: { type: String, required: true },
   provider: { type: String, required: true },
   amount_paid_usd: { type: Number, required: true },
-  payment_method: { type: String, default: 'x402' },
   transaction_id: { type: String, required: true },
-  x402_headers: { type: mongoose.Schema.Types.Mixed },
   response_data: { type: mongoose.Schema.Types.Mixed },
   execution_time_ms: { type: Number },
   created_at: { type: Date, default: Date.now }
@@ -202,6 +200,19 @@ const emailSchema = new mongoose.Schema({
   subject: { type: String },
   body: { type: String },
   
+  // LinkedIn InMail content
+  linkedin_inmail: {
+    subject: { type: String },
+    body: { type: String },
+    character_count: { type: Number }
+  },
+  
+  // LinkedIn Connection Request content (max 300 chars)
+  linkedin_connection_request: {
+    message: { type: String },
+    character_count: { type: Number }
+  },
+  
   // Generation metadata
   model_used: { type: String, default: 'accounts/fireworks/models/llama-v3p1-70b-instruct' },
   prompt_tokens: { type: Number },
@@ -275,7 +286,8 @@ const workflowSchema = new mongoose.Schema({
     job_search: { type: Number, default: 0 },
     people_search: { type: Number, default: 0 },
     person_enrichment: { type: Number, default: 0 },
-    email_generation: { type: Number, default: 0 }
+    email_generation: { type: Number, default: 0 },
+    linkedin_generation: { type: Number, default: 0 }
   },
   
   // Error tracking

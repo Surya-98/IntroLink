@@ -9,8 +9,9 @@ const FIREWORKS_API_URL = 'https://api.fireworks.ai/inference/v1/chat/completion
  * recruiters and hiring managers based on resume and job context.
  */
 export class EmailDrafterService {
-  constructor(apiKey) {
+  constructor(apiKey, senderName) {
     this.apiKey = apiKey || process.env.FIREWORKS_API_KEY;
+    this.senderName = senderName || process.env.SENDER_NAME || 'Bala';
     this.model = 'accounts/fireworks/models/glm-4p7'
     
     // Pricing (approximate - Fireworks pricing varies)
@@ -310,6 +311,8 @@ BODY:
 
     if (signOffIndex >= 0) {
       cleanedBody = lines.slice(0, signOffIndex + 1).join('\n');
+      // Append sender name after the sign-off
+      cleanedBody += '\n' + this.senderName;
     }
 
     // Remove any remaining chain-of-thought artifacts

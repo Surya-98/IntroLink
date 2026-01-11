@@ -2,32 +2,29 @@
 
 A job search helper tool that drafts and sends cold emails to relevant people from job postings.
 
-## 🎯 Key Feature: x402 Payment Protocol
+## 🎯 Key Features
 
-IntroLink implements the **x402 Payment Protocol** - a price-shopping mechanism for AI agent actions:
+IntroLink is an **AI-powered job outreach agent** that automates the job search process:
 
-1. **Quote Sweep** - Request quotes from multiple providers (get 402 Payment Required)
-2. **Compare Offers** - Evaluate by price/latency/reliability
-3. **Pay Winner** - Execute only with the best provider
-4. **Track Receipts** - Full cost provenance for every action
-
-This is genuinely different from "cost-aware" systems - it's **price-shopping for actions**.
+1. **Job Search** - Find relevant job postings from LinkedIn
+2. **Contact Discovery** - Identify recruiters and hiring managers at target companies
+3. **Email Enrichment** - Find contact email addresses
+4. **Personalized Outreach** - Draft tailored cold emails based on your resume
 
 ## 🏗 Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     x402 Orchestrator                        │
+│                    Agent Orchestrator                        │
 ├─────────────────────────────────────────────────────────────┤
-│  Quote Sweep → Compare Offers → Pay Winner → Track Receipt   │
+│  Resume Parse → Job Search → Find Contacts → Draft Emails    │
 └─────────────────────────────────────────────────────────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
 ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
-│  Job Feed     │     │ People Finder │     │   Message     │
-│    Tool       │     │    Tool       │     │  Composer     │
-│  (per-query)  │     │ (Apify Exa)   │     │   (AI)        │
+│  Job Finder   │     │ People Finder │     │   Message     │
+│  (LinkedIn)   │     │   (Apify)     │     │  Composer     │
 └───────────────┘     └───────────────┘     └───────────────┘
 ```
 
@@ -62,16 +59,6 @@ MONGODB_URI=mongodb://localhost:27017/introlink
 PORT=3001
 ```
 
-### Run the Test
-
-```bash
-# Test the people finder with mock data (no API key needed)
-node src/test-people-finder.js
-
-# Or with real Apify integration
-APIFY_TOKEN=your_token node src/test-people-finder.js
-```
-
 ### Start the API Server
 
 ```bash
@@ -82,7 +69,7 @@ npm run dev
 
 ## 📡 API Endpoints
 
-### Get Quote (402 Payment Required)
+### Get Quote for People Search
 ```bash
 POST /api/people-finder/quote
 {
@@ -90,47 +77,65 @@ POST /api/people-finder/quote
   "role": "Software Engineer",
   "numResults": 5
 }
-# Returns: 402 with pricing info
+# Returns: Pricing info
 ```
 
-### Sweep Quotes from All Providers
-```bash
-POST /api/people-finder/sweep
-{
-  "company": "Stripe",
-  "role": "Software Engineer"
-}
-# Returns: All provider quotes for comparison
-```
-
-### Pay and Execute
-```bash
-POST /api/pay/:offerId
-# Returns: Result + receipt with transaction details
-```
-
-### Full Flow (Sweep → Pay → Execute)
+### Execute People Search
 ```bash
 POST /api/people-finder/search
 {
   "company": "Stripe",
   "role": "Software Engineer",
   "numResults": 5,
-  "strategy": "cheapest"  // cheapest | fastest | reliable | balanced
+  "enrichContacts": true
 }
-# Returns: Contacts + receipt + quote comparison
+# Returns: Contacts + receipt
+```
+
+### Get Quote for Job Search
+```bash
+POST /api/job-finder/quote
+{
+  "keywords": "Software Engineer",
+  "location": "San Francisco"
+}
+# Returns: Pricing info
+```
+
+### Execute Job Search
+```bash
+POST /api/job-finder/search
+{
+  "keywords": "Software Engineer",
+  "location": "San Francisco",
+  "limit": 25
+}
+# Returns: Jobs + receipt
+```
+
+### Start Agent Workflow
+```bash
+POST /api/agent/start
+{
+  "resumeText": "Your resume text here...",
+  "targetRoles": ["Software Engineer", "Backend Developer"],
+  "targetCompanies": ["Stripe", "Google"],
+  "targetLocations": ["San Francisco", "Remote"]
+}
+# Returns: Workflow ID
 ```
 
 ### View Data
 ```bash
-GET /api/offers    # All quotes (including rejected)
-GET /api/receipts  # Paid transactions
-GET /api/contacts  # Found people with cost provenance
+GET /api/jobs          # All jobs
+GET /api/receipts      # Transaction receipts
+GET /api/contacts      # Found people
+GET /api/agent/workflows  # All workflows
 ```
 
-## 💰 Cost Provenance
+## 💰 Cost Tracking
 
-Every contact shows exactly what was paid:
+Every contact shows what was paid:
 
 ```json
 {
@@ -138,12 +143,7 @@ Every contact shows exactly what was paid:
   "provenance": {
     "source": "apify-exa",
     "cost_usd": 0.005,
-    "query_used": "\"Stripe\" (recruiter OR \"talent acquisition\")",
-    "receipt": {
-      "transaction_id": "tx_abc123",
-      "total_paid": 0.015,
-      "provider": "apify-exa"
-    }
+    "query_used": "\"Stripe\" (recruiter OR \"talent acquisition\")"
   }
 }
 ```
@@ -152,68 +152,74 @@ Every contact shows exactly what was paid:
 
 | Collection | Purpose |
 |------------|---------|
-| `offers` | All quotes received (even rejected ones) |
-| `receipts` | Paid headers + settlement details |
+| `receipts` | Transaction records |
 | `contacts` | Found people + sources + costs |
+| `jobs` | LinkedIn job listings |
+| `workflows` | Agent workflow runs |
+| `emails` | Drafted outreach messages |
 
-## 🔧 People Finder Tool
+## 🔧 Tools & Services
 
-The People Finder uses **Apify's Exa AI People Search** actor to find:
+### People Finder
+Uses **Apify's Exa AI People Search** to find:
 - Recruiters
 - Hiring managers
 - Engineering managers
 - Talent acquisition specialists
 
-### Apify Actor
-- ID: `fantastic-jobs~exa-ai-people-search`
-- Pricing: ~$0.015 per search
-- Returns: LinkedIn profiles, titles, company affiliations
+### Job Finder
+Uses **Apify's LinkedIn Job Search** to find:
+- Job listings by keywords
+- Filter by location, seniority, work arrangement
+- Company-specific searches
+
+### Email Enrichment
+Uses **Tomba** for:
+- LinkedIn profile email lookup
+- Email verification
 
 ## 📝 Example Output
 
 ```
-🔍 IntroLink People Finder Test
+🔍 IntroLink Agent Workflow
 
-💰 Step 1: Sweeping quotes from all providers...
+📄 Step 1: Processing resume...
+   ✅ Resume stored
 
-   📦 apify-exa
-      Price: $0.0200
-      Latency: 3000ms
-      Reliability: 92%
-      402 Headers:
-         X-Payment-Required: true
-         X-Price-USD: 0.02
+💼 Step 2: Searching jobs...
+   Found 15 jobs for "Software Engineer"
 
-   📦 mock-provider
-      Price: $0.0100
-      Latency: 500ms
-      Reliability: 99%
+👥 Step 3: Finding contacts...
+   Found 3 contacts at Stripe
+   Found 2 contacts at Google
 
-🎯 Step 2: Selecting best offer (strategy: cheapest)...
-   Selected: mock-provider at $0.0100
+✉️ Step 4: Drafting emails...
+   Drafted 5 personalized emails
 
-💳 Step 3: Paying and executing...
-   ✅ Success!
-   📧 Receipt:
-      Transaction ID: tx_abc123
-      Amount Paid: $0.0100
-
-👥 Found Contacts (with cost provenance):
-
-   1. Sarah Chen
-      Title: Senior Technical Recruiter
-      Company: Stripe
-      LinkedIn: https://linkedin.com/in/sarah-chen-recruiter
-      💵 Cost: $0.0033 (via mock-provider)
+📊 Summary:
+   Jobs Found: 15
+   Contacts Found: 5
+   Emails Drafted: 5
+   Total Cost: $0.15
 ```
 
-## 🎨 Why This is Different
+## 🎨 Frontend
 
-This isn't just another job search tool. The x402 protocol means:
+The frontend provides a modern dashboard for:
+- Uploading resumes
+- Configuring job search preferences
+- Viewing job results
+- Managing contacts
+- Reviewing drafted emails
 
-1. **Agents can shop for the best deal** on every action
-2. **Full transparency** on what each piece of data cost
-3. **Receipts prove** the agent made economical choices
-4. **Multiple providers compete** for each task
+### Running the Frontend
 
-Perfect for demonstrating AI agent payment systems in the real world.
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## 📄 License
+
+MIT
